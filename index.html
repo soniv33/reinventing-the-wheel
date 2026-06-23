@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0c1018" />
+<title>Reinventing the Wheel</title>
+<style>
+  /* ---------------------------------------------------------------------
+     Layout: a full-screen WebGL canvas with DOM overlays on top.
+     All interactive controls live near the bottom so they're thumb-reachable
+     on a phone held in portrait or landscape.
+  --------------------------------------------------------------------- */
+  :root {
+    --tarmac:#4a4f5a; --sand:#d9b15e; --mud:#6e4d2e; --rocky:#7d7f86;
+    --ice:#a9e0f2; --hill:#5f8f4f; --good:#46d36a; --bad:#e0533d;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; overflow:hidden; background:#0c1018;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:#eef2f7; user-select:none; -webkit-user-select:none; touch-action:none; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; width:100%; height:100%; }
+
+  /* Top telegraph strip: upcoming terrain + weather so the player can plan. */
+  #strip { position:fixed; top:0; left:0; right:0; height:46px; display:flex;
+    padding:6px 8px; gap:4px; align-items:stretch; pointer-events:none;
+    background:linear-gradient(#0c1018cc,#0c101800); }
+  .zone { flex:1; border-radius:7px; position:relative; display:flex;
+    flex-direction:column; justify-content:center; align-items:center;
+    font-size:10px; font-weight:700; letter-spacing:.3px; color:#0c1018e0;
+    overflow:hidden; box-shadow:inset 0 0 0 1px #ffffff22; min-width:0; }
+  .zone span.w { font-size:13px; line-height:1; }
+  .zone.active { box-shadow:inset 0 0 0 2px #fff, 0 0 10px #fff8; }
+  #progress { position:fixed; top:46px; left:0; height:3px; background:#fff;
+    width:0; box-shadow:0 0 8px #fff; transition:width .1s linear; }
+
+  /* HUD: position + multiplier gauge. */
+  #hud { position:fixed; left:10px; top:56px; display:flex; flex-direction:column;
+    gap:8px; pointer-events:none; }
+  #pos { font-size:30px; font-weight:800; line-height:1; text-shadow:0 2px 6px #000a; }
+  #pos small { font-size:14px; opacity:.7; font-weight:600; }
+  #terrLabel { font-size:12px; font-weight:700; opacity:.9; text-shadow:0 1px 4px #000a; }
+  #gaugeWrap { width:150px; }
+  #gaugeLabel { font-size:10px; opacity:.75; margin-bottom:2px; font-weight:600;
+    text-transform:uppercase; letter-spacing:1px; }
+  #gauge { width:100%; height:12px; border-radius:6px; background:#ffffff22;
+    overflow:hidden; box-shadow:inset 0 0 0 1px #ffffff22; }
+  #gaugeFill { height:100%; width:50%; border-radius:6px; transition:width .15s, background .15s; }
+
+  /* Redraw button: large, bottom-centre. */
+  #redrawBtn { position:fixed; bottom:max(18px,env(safe-area-inset-bottom));
+    left:50%; transform:translateX(-50%); padding:15px 30px; border:none;
+    border-radius:30px; font-size:17px; font-weight:800; letter-spacing:.5px;
+    color:#0c1018; background:linear-gradient(#ffd25e,#ffb020);
+    box-shadow:0 6px 18px #0008, inset 0 1px 0 #fff8; cursor:pointer;
+    pointer-events:auto; }
+  #redrawBtn:active { transform:translateX(-50%) scale(.95); }
+  #redrawBtn.cooling { background:linear-gradient(#5a6172,#444a58); color:#ffffff66; }
+
+  /* Draw overlay: a 2D sketch surface that opens over the (slowed) game. */
+  #drawLayer { position:fixed; inset:0; display:none; z-index:20;
+    background:radial-gradient(circle at 50% 42%, #11203aee, #060a12f4);
+    backdrop-filter:blur(2px); }
+  #drawLayer.open { display:block; }
+  #drawCanvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none; }
+  #drawHint { position:fixed; top:calc(env(safe-area-inset-top) + 14px); left:0; right:0;
+    text-align:center; font-size:14px; font-weight:600; opacity:.92;
+    pointer-events:none; padding:0 20px; line-height:1.4; }
+  #drawHint b { color:#ffd25e; }
+  #drawBtns { position:fixed; bottom:max(20px,env(safe-area-inset-bottom));
+    left:0; right:0; display:flex; gap:12px; justify-content:center; padding:0 16px; }
+  #drawBtns button { flex:1; max-width:200px; padding:15px; border:none;
+    border-radius:26px; font-size:16px; font-weight:800; cursor:pointer; }
+  #goBtn { background:linear-gradient(#46d36a,#2faa4f); color:#04210d;
+    box-shadow:0 6px 16px #0007; }
+  #goBtn:disabled { filter:grayscale(.7) brightness(.7); }
+  #cancelBtn { background:#ffffff1a; color:#fff; box-shadow:inset 0 0 0 1px #fff3; }
+
+  /* Result / message banner. */
+  #banner { position:fixed; inset:0; display:none; z-index:30; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px; text-align:center;
+    background:#060a12e0; padding:24px; }
+  #banner.open { display:flex; }
+  #banner h1 { font-size:40px; margin:0; letter-spacing:1px;
+    text-shadow:0 4px 18px #000; }
+  #banner p { margin:0; opacity:.85; font-size:15px; max-width:340px; line-height:1.5; }
+  #banner .card { background:#141b29; border-radius:14px; padding:16px 22px;
+    box-shadow:inset 0 0 0 1px #ffffff14; font-size:14px; line-height:1.7; }
+  #banner button { margin-top:6px; padding:14px 32px; border:none; border-radius:28px;
+    font-size:17px; font-weight:800; color:#0c1018;
+    background:linear-gradient(#ffd25e,#ffb020); box-shadow:0 6px 18px #0008; cursor:pointer; }
+
+  /* Boot / loading screen. */
+  #boot { position:fixed; inset:0; z-index:40; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; background:#0c1018;
+    text-align:center; padding:24px; }
+  #boot h1 { font-size:30px; margin:0; letter-spacing:1px;
+    background:linear-gradient(#ffd25e,#ff8a3c); -webkit-background-clip:text;
+    background-clip:text; color:transparent; }
+  #boot .sub { opacity:.6; font-size:13px; max-width:300px; line-height:1.5; }
+  #boot .spin { width:34px; height:34px; border-radius:50%;
+    border:3px solid #ffffff22; border-top-color:#ffd25e; animation:sp 1s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  #boot.err .spin { display:none; }
+  #boot .errmsg { color:#e0533d; font-size:13px; display:none; }
+  #boot.err .errmsg { display:block; }
+  .flash { animation:flash .5s ease-out; }
+  @keyframes flash { 0%{filter:brightness(2.4) saturate(0);} 100%{filter:none;} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- Top telegraph strip + progress marker -->
+<div id="strip"></div>
+<div id="progress"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="pos">1<small>/4</small></div>
+  <div id="terrLabel">TARMAC</div>
+  <div id="gaugeWrap">
+    <div id="gaugeLabel">Wheel × Terrain</div>
+    <div id="gauge"><div id="gaugeFill"></div></div>
+  </div>
+</div>
+
+<button id="redrawBtn">✎ REDRAW WHEEL</button>
+
+<!-- Draw overlay -->
+<div id="drawLayer">
+  <canvas id="drawCanvas"></canvas>
+  <div id="drawHint">Sketch your wheel's <b>side profile</b> — one closed loop.<br>Round = fast &amp; smooth · Spiky = grips mud/ice · Wide = floats on sand</div>
+  <div id="drawBtns">
+    <button id="cancelBtn">Cancel</button>
+    <button id="goBtn" disabled>Materialise</button>
+  </div>
+</div>
+
+<!-- Result banner -->
+<div id="banner">
+  <h1 id="bannerTitle">Finish</h1>
+  <p id="bannerText"></p>
+  <div class="card" id="bannerCard"></div>
+  <button id="restartBtn">Race again</button>
+</div>
+
+<!-- Boot screen -->
+<div id="boot">
+  <h1>Reinventing the Wheel</h1>
+  <div class="spin"></div>
+  <div class="sub">Loading physics &amp; renderer…<br>Draw a wheel, race the pack.</div>
+  <div class="errmsg">Couldn't start the engine. Check your connection (CDN/WASM) and reload.</div>
+</div>
+
+<!-- ESM import map: Three.js for rendering, Rapier3D (compat = inline wasm) for physics.
+     No build step, no bundler. The "compat" Rapier build base64-encodes its wasm so a
+     single static file works on GitHub Pages and on phones without a separate .wasm fetch. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+    "@dimforge/rapier3d-compat": "https://esm.sh/@dimforge/rapier3d-compat@0.14.0"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import RAPIER from '@dimforge/rapier3d-compat';
+
+/* =====================================================================
+   0. TUNING CONSTANTS  — balance lives here, deliberately up top.
+   ===================================================================== */
+const FIXED_DT      = 1/60;     // physics timestep (decoupled from render)
+const MAX_SUBSTEPS  = 5;        // clamp catch-up so a stall can't spiral
+const GRAVITY       = -22;      // arcade-strong gravity for snappy feel
+const BASE_SPEED    = 9.0;      // target m/s of a "neutral" wheel (mult = 1.0)
+const TRACTION_K    = 70;       // how hard we chase target speed (arcade traction)
+const TRACTION_FMAX = 150;      // cap on traction impulse force
+const SPEED_CAP     = 16;       // hard cap on forward velocity
+const WHEEL_OMEGA_CAP = 42;     // clamp wheel spin so nothing explodes
+const MATERIALISE_S = 1.2;      // torque-cut delay after a redraw (the cost)
+const DRAW_TIMESCALE= 0.15;     // slow-mo factor while the draw overlay is open
+const TRACK_LENGTH  = 320;      // finish line X
+const LANES_Z       = [2.0, 0.4, -1.0, -2.4]; // player first (closest to cam)
+
+/* =====================================================================
+   1.  ███  THE HEART OF THE GAME  ███
+   geometryToProfile() reads three shape properties off a drawn polygon,
+   and shapeTerrainMultiplier() turns (profile × terrain × weather) into a
+   single speed multiplier. Everything balance-related is in THIS section
+   and nowhere else, so tuning never means hunting through physics code.
+   ===================================================================== */
+
+/* Read the three gameplay-relevant properties off a normalised 2D polygon
+   (centroid already at origin, area already normalised — see buildWheel).
+     • roundness  ∈[0,1]  1 = perfect circle, 0 = wildly irregular
+     • tread      ∈[0,1]  spikiness: radial variance + vertex detail
+     • width      ∈[0,1]  footprint: how wide/squat vs tall/narrow
+   These are intentionally simple, monotonic, and independent so the
+   terrain formulas below read like plain English. */
+function geometryToProfile(pts) {
+  const n = pts.length;
+  // Radii from the centroid (which is at the origin after normalisation).
+  let meanR = 0;
+  const radii = pts.map(p => Math.hypot(p.x, p.y));
+  for (const r of radii) meanR += r;
+  meanR /= n;
+  // Coefficient of variation of the radii = how "not-a-circle" the outline is.
+  let varSum = 0;
+  for (const r of radii) varSum += (r - meanR) * (r - meanR);
+  const cv = meanR > 1e-5 ? Math.sqrt(varSum / n) / meanR : 0;
+
+  // Bounding box → aspect ratio → footprint width.
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for (const p of pts){ if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x;
+                        if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y; }
+  const bw = maxX-minX, bh = Math.max(1e-5, maxY-minY);
+  const aspect = bw/bh;                       // >1 = wide & squat
+
+  const roundness = clamp01(1 - cv * 2.2);             // circle → 1
+  const tread     = clamp01(cv * 1.7 + (n/24) * 0.55); // jagged & detailed → 1
+  const width     = clamp01((aspect - 0.7) / (1.7 - 0.7)); // squat → 1
+
+  return { roundness, tread, width, cv, verts:n, aspect };
+}
+
+/* Terrain catalogue. `key` drives the analytic formula; the rest is presentation
+   (colour for the ground + telegraph strip, friendly name). */
+const TERRAIN = {
+  tarmac: { name:'TARMAC', color:0x4a4f5a, strip:'#4a4f5a' },
+  sand:   { name:'SAND',   color:0xd9b15e, strip:'#d9b15e' },
+  mud:    { name:'MUD',    color:0x6e4d2e, strip:'#6e4d2e' },
+  rocky:  { name:'ROCKY',  color:0x7d7f86, strip:'#7d7f86' },
+  ice:    { name:'ICE',    color:0xa9e0f2, strip:'#a9e0f2' },
+  hill:   { name:'HILL',   color:0x5f8f4f, strip:'#5f8f4f' },
+};
+const WEATHER = {
+  dry:  { name:'Dry',  icon:'☀' },
+  rain: { name:'Rain', icon:'🌧' },
+  snow: { name:'Snow', icon:'❄' },
+  heat: { name:'Heat', icon:'🔥' },
+};
+
+/* THE formula. Returns a speed/grip multiplier (≈0.25 slow … 1.6 fast).
+   Each terrain is one readable line describing its winning shape, exactly
+   per the design brief. Keep the additive form — it's trivial to retune. */
+function shapeTerrainMultiplier(profile, terrainKey, weatherKey) {
+  const { roundness, tread, width } = profile;
+  let m;
+  switch (terrainKey) {
+    // Smooth round rolls fast on hard tarmac; tread just wastes energy.
+    case 'tarmac':
+      m = 0.70 + 0.65*roundness - 0.35*tread; break;
+    // Dunes: a wide fat smooth wheel floats; narrow/spiky knifes in and sinks.
+    case 'sand':
+      m = 0.60 + 0.65*width + 0.30*roundness - 0.55*tread; break;
+    // Mud: treaded/gear-like wheel bites; a smooth circle just spins out.
+    case 'mud':
+      m = 0.58 + 0.75*tread - 0.35*roundness; break;
+    // Rocky: a larger flat-faced polygon rolls over; a tiny smooth wheel jams.
+    case 'rocky':
+      m = 0.60 + 0.50*tread + 0.40*width - 0.25*roundness; break;
+    // Ice: studs/spikes grip; a round wheel slides helplessly.
+    case 'ice':
+      m = 0.55 + 0.85*tread - 0.45*roundness; break;
+    // Hill climb: wants grip + bite, mild help from a broad footprint.
+    case 'hill':
+      m = 0.58 + 0.70*tread + 0.20*width - 0.10*roundness; break;
+    default:
+      m = 1.0;
+  }
+
+  /* Weather modifies the *active* segment (also commented inline so the
+     interaction with each surface is obvious). */
+  switch (weatherKey) {
+    case 'rain':
+      // Wet tarmac loses grip → the round-wheel advantage evaporates.
+      if (terrainKey === 'tarmac') m -= 0.30 * roundness;
+      m -= 0.05; break;
+    case 'snow':
+      // A snow overlay rewards tread on top of whatever's underneath.
+      m += 0.25*tread - 0.20*roundness; break;
+    case 'heat':
+      // Heat bakes mud hard & fast → it starts behaving like tarmac (round wins).
+      if (terrainKey === 'mud') m += 0.40*roundness - 0.30*tread;
+      break;
+  }
+  return clamp(m, 0.25, 1.6);
+}
+
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function clamp01(v){ return v<0?0:v>1?1:v; }
+
+/* =====================================================================
+   2. DRAWING PIPELINE: raw stroke → simplify → close → normalise → Shape.
+   ===================================================================== */
+
+/* Douglas–Peucker polyline simplification (recursive). Keeps the silhouette
+   that matters and throws away the jitter of a finger drag. */
+function douglasPeucker(points, eps) {
+  if (points.length < 3) return points.slice();
+  let dmax = 0, idx = 0;
+  const a = points[0], b = points[points.length-1];
+  for (let i=1; i<points.length-1; i++){
+    const d = perpDist(points[i], a, b);
+    if (d > dmax){ dmax = d; idx = i; }
+  }
+  if (dmax > eps){
+    const left  = douglasPeucker(points.slice(0, idx+1), eps);
+    const right = douglasPeucker(points.slice(idx), eps);
+    return left.slice(0,-1).concat(right);
+  }
+  return [a, b];
+}
+function perpDist(p, a, b){
+  const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy;
+  if (l2===0) return Math.hypot(p.x-a.x, p.y-a.y);
+  let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/l2; t=clamp01(t);
+  return Math.hypot(p.x-(a.x+t*dx), p.y-(a.y+t*dy));
+}
+function shoelaceArea(pts){
+  let s=0; for(let i=0;i<pts.length;i++){ const j=(i+1)%pts.length;
+    s += pts[i].x*pts[j].y - pts[j].x*pts[i].y; } return Math.abs(s)/2;
+}
+
+/* Turn raw screen-space stroke points into a clean, normalised wheel polygon.
+   Normalisation to a constant target area is what stops "draw it huge" or
+   "draw it microscopic" from breaking balance — only the *shape* survives. */
+const TARGET_AREA = Math.PI * 0.5 * 0.5;  // area of a r=0.5 circle
+function normaliseStroke(raw){
+  if (raw.length < 3) return null;
+  // Simplify relative to the stroke's own size so it scales with screen DPI.
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(const p of raw){ if(p.x<minX)minX=p.x;if(p.x>maxX)maxX=p.x;
+                       if(p.y<minY)minY=p.y;if(p.y>maxY)maxY=p.y; }
+  const span = Math.max(maxX-minX, maxY-minY, 1);
+  let pts = douglasPeucker(raw, span * 0.02);
+  // Drop a duplicate closing point if present, need ≥3 distinct verts.
+  if (pts.length>1){ const f=pts[0], l=pts[pts.length-1];
+    if (Math.hypot(f.x-l.x,f.y-l.y) < span*0.03) pts.pop(); }
+  if (pts.length < 3) return null;
+
+  // Flip Y (screen y is down) and centre on centroid.
+  let cx=0, cy=0; for(const p of pts){ cx+=p.x; cy+=p.y; }
+  cx/=pts.length; cy/=pts.length;
+  pts = pts.map(p => ({ x:(p.x-cx), y:-(p.y-cy) }));
+
+  // Scale to constant area so big vs tiny drawings are balanced equivalently.
+  let area = shoelaceArea(pts);
+  if (area < 1e-4) return null;
+  let s = Math.sqrt(TARGET_AREA / area);
+  pts = pts.map(p => ({ x:p.x*s, y:p.y*s }));
+
+  // Safety clamp on outer radius so extreme silhouettes still seat on the axle.
+  let r=0; for(const p of pts) r=Math.max(r, Math.hypot(p.x,p.y));
+  if (r > 0.85){ const k=0.85/r; pts=pts.map(p=>({x:p.x*k,y:p.y*k})); }
+  if (r < 0.40){ const k=0.40/r; pts=pts.map(p=>({x:p.x*k,y:p.y*k})); }
+  return pts;
+}
+
+/* Build the visible 3D wheel (true extruded mesh) + the data the physics
+   needs (convex-hull point cloud). depth (axle width) tracks footprint so
+   wide drawings read as physically fat wheels. */
+function buildWheel(pts2d, material){
+  const profile = geometryToProfile(pts2d);
+  const depth = 0.30 + 0.45 * profile.width;     // axle-direction thickness
+
+  const shape = new THREE.Shape(pts2d.map(p => new THREE.Vector2(p.x, p.y)));
+  const geom = new THREE.ExtrudeGeometry(shape, {
+    depth, bevelEnabled:false, steps:1, curveSegments:2,
+  });
+  geom.translate(0, 0, -depth/2);   // centre on the axle
+  geom.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geom, material);
+  // A contrasting hub bar so spin is obvious even on a near-circle.
+  const hub = new THREE.Mesh(
+    new THREE.BoxGeometry(0.07, 0.7, depth+0.02),
+    HUB_MAT
+  );
+  mesh.add(hub);
+
+  // Outer radius (for spawn height) and the hull cloud for Rapier.
+  let radius=0; for(const p of pts2d) radius=Math.max(radius,Math.hypot(p.x,p.y));
+  const hullPts = new Float32Array(geom.attributes.position.array);
+
+  return { mesh, geom, profile, depth, radius, hullPts };
+}
+
+/* =====================================================================
+   3. THREE.JS SCENE  (flat / low-poly, two lights, capped DPR).
+   ===================================================================== */
+const container = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); // phone cap
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x0c1018);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x0c1018, 40, 110);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 400);
+camera.position.set(-7, 5, 8);
+
+// Minimal lighting: one directional + ambient (per perf brief).
+scene.add(new THREE.AmbientLight(0x9fb4d8, 0.75));
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.25);
+sun.position.set(-6, 12, 8);
+scene.add(sun);
+
+// Shared materials / geometry — reuse keeps draw calls + allocations low.
+const HUB_MAT     = new THREE.MeshStandardMaterial({ color:0x202531, flatShading:true, roughness:.9 });
+const CHASSIS_GEO = new THREE.BoxGeometry(0.95, 0.5, 0.72);
+const DRIVER_GEO  = new THREE.SphereGeometry(0.2, 8, 6);
+const WHEEL_MATS  = [
+  new THREE.MeshStandardMaterial({ color:0xffce4a, flatShading:true, roughness:.6 }), // player
+  new THREE.MeshStandardMaterial({ color:0xe0573d, flatShading:true, roughness:.7 }),
+  new THREE.MeshStandardMaterial({ color:0x49a0e6, flatShading:true, roughness:.7 }),
+  new THREE.MeshStandardMaterial({ color:0x9b6cd8, flatShading:true, roughness:.7 }),
+];
+const CHASSIS_MATS = WHEEL_MATS.map(m => new THREE.MeshStandardMaterial(
+  { color:m.color.clone().multiplyScalar(0.8), flatShading:true, roughness:.8 }));
+
+/* =====================================================================
+   4. PHYSICS WORLD + TRACK
+   ===================================================================== */
+let world;
+
+// The track as data: contiguous terrain zones along +X, each with weather.
+const ZONES = [
+  { terrain:'tarmac', weather:'dry',  len:42 },
+  { terrain:'sand',   weather:'heat', len:46 },
+  { terrain:'mud',    weather:'dry',  len:44 },
+  { terrain:'rocky',  weather:'dry',  len:46 },
+  { terrain:'ice',    weather:'snow', len:44 },
+  { terrain:'hill',   weather:'dry',  len:50 },
+  { terrain:'tarmac', weather:'rain', len:48 },
+];
+// Resolve absolute start/end X for each zone.
+(function layoutZones(){
+  let x = 0;
+  for (const z of ZONES){ z.start = x; x += z.len; z.end = x; }
+  ZONES.totalLen = x;
+})();
+function zoneAt(x){
+  for (const z of ZONES) if (x >= z.start && x < z.end) return z;
+  return x < 0 ? ZONES[0] : ZONES[ZONES.length-1];
+}
+
+const trackMeshes = [];
+function buildTrack(){
+  // One long flat physics floor (cheap + stable), plus a couple of physical
+  // ramps in the hill zone and bumps in the rocky zone for real terrain feel.
+  const floorBody = world.createRigidBody(
+    RAPIER.RigidBodyDesc.fixed().setTranslation(ZONES.totalLen/2, -1, 0));
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(ZONES.totalLen/2 + 30, 1, 8).setFriction(1.0), floorBody);
+
+  // Render the floor as per-zone coloured slabs (reuse a unit box geometry).
+  const unit = new THREE.BoxGeometry(1,1,1);
+  for (const z of ZONES){
+    const mat = new THREE.MeshStandardMaterial(
+      { color:TERRAIN[z.terrain].color, flatShading:true, roughness:.95 });
+    const m = new THREE.Mesh(unit, mat);
+    m.scale.set(z.len, 2, 16);
+    m.position.set((z.start+z.end)/2, -1, 0);
+    scene.add(m); trackMeshes.push(m);
+  }
+
+  // Hill zone: up-ramp → plateau → down-ramp (wide in Z to span all lanes).
+  const hill = ZONES.find(z => z.terrain === 'hill');
+  if (hill){
+    const rampMat = new THREE.MeshStandardMaterial(
+      { color:TERRAIN.hill.color, flatShading:true, roughness:.95 });
+    addRamp(hill.start + 9,  0.55,  +0.32, rampMat); // climb
+    addSlab(hill.start + 22, 1.7, 16, rampMat);      // plateau top
+    addRamp(hill.start + 35, 0.55, -0.32, rampMat);  // descent
+  }
+  // Rocky zone: a few low bumps to justify "rolls over with a big polygon".
+  const rocky = ZONES.find(z => z.terrain === 'rocky');
+  if (rocky){
+    for (let i=0;i<4;i++) addSlab(rocky.start + 8 + i*9, 0.35 + Math.random()*0.25, 3, null, 0x6c6e75);
+  }
+}
+function addRamp(x, halfH, angle, mat){
+  const len = 16;
+  const body = world.createRigidBody(
+    RAPIER.RigidBodyDesc.fixed().setTranslation(x, halfH-0.2, 0)
+      .setRotation(quatZ(angle)));
+  world.createCollider(RAPIER.ColliderDesc.cuboid(len/2, 0.6, 8).setFriction(1.0), body);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(len, 1.2, 16), mat);
+  m.position.set(x, halfH-0.2, 0); m.quaternion.copy(quatZThree(angle));
+  scene.add(m); trackMeshes.push(m);
+}
+function addSlab(x, halfH, halfZ, mat, color){
+  const body = world.createRigidBody(
+    RAPIER.RigidBodyDesc.fixed().setTranslation(x, halfH-0.2, 0));
+  world.createCollider(RAPIER.ColliderDesc.cuboid(4, halfH, halfZ).setFriction(1.0), body);
+  const material = mat || new THREE.MeshStandardMaterial({ color:color||0x777, flatShading:true, roughness:.95 });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(8, halfH*2, halfZ*2), material);
+  m.position.set(x, halfH-0.2, 0);
+  scene.add(m); trackMeshes.push(m);
+}
+function quatZ(a){ return { x:0, y:0, z:Math.sin(a/2), w:Math.cos(a/2) }; }
+function quatZThree(a){ return new THREE.Quaternion(0,0,Math.sin(a/2),Math.cos(a/2)); }
+
+// Finish line marker (visual only; crossing is detected by X).
+function buildFinish(){
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 6, 16),
+    new THREE.MeshStandardMaterial({ color:0xffffff, flatShading:true }));
+  post.position.set(TRACK_LENGTH, 2, 0); scene.add(post);
+}
+
+/* =====================================================================
+   5. VEHICLES  (single drawn wheel + locked-upright chassis on a revolute joint)
+   ===================================================================== */
+const vehicles = [];
+
+function makeVehicle({ lane, isPlayer, matIndex, profilePts }){
+  const z = LANES_Z[lane];
+  const wheel = buildWheel(profilePts, WHEEL_MATS[matIndex]);
+  const spawnX = 1.5;
+  const wheelY = wheel.radius + 0.05;
+
+  // --- Wheel rigid body: spins only about Z, locked into its lane (Z). ---
+  const wheelBody = world.createRigidBody(
+    RAPIER.RigidBodyDesc.dynamic().setTranslation(spawnX, wheelY, z)
+      .enabledRotations(false,false,true)
+      .enabledTranslations(true,true,false)
+      .setAngularDamping(0.05).setLinearDamping(0.05));
+  attachWheelCollider(wheelBody, wheel);
+
+  // --- Chassis: kept perfectly upright (all rotation locked) so a one-wheeler
+  //     is stable; rides above the wheel, also locked to the lane. ---
+  const chassisBody = world.createRigidBody(
+    RAPIER.RigidBodyDesc.dynamic().setTranslation(spawnX, wheelY + 0.62, z)
+      .enabledRotations(false,false,false)
+      .enabledTranslations(true,true,false)
+      .setLinearDamping(0.2));
+  // (No collision-group filtering needed: every racer is locked to its own
+  //  Z-lane and the lanes are spaced wider than any wheel, so vehicles can
+  //  never physically overlap each other — only the ground.)
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(0.47,0.25,0.36).setDensity(0.4).setFriction(0.2),
+    chassisBody);
+
+  // --- Motorised revolute joint: chassis ↔ wheel, axis = Z, constant target. ---
+  const joint = world.createImpulseJoint(
+    RAPIER.JointData.revolute(
+      { x:0, y:-0.62, z:0 },  // anchor on chassis (down to wheel centre)
+      { x:0, y:0,    z:0 },   // anchor on wheel (its centre)
+      { x:0, y:0,    z:1 }),  // hinge axis
+    chassisBody, wheelBody, true);
+
+  // Meshes.
+  const chassisMesh = new THREE.Mesh(CHASSIS_GEO, CHASSIS_MATS[matIndex]);
+  const driver = new THREE.Mesh(DRIVER_GEO, HUB_MAT);
+  driver.position.set(-0.1, 0.35, 0); chassisMesh.add(driver);
+  scene.add(chassisMesh);
+  scene.add(wheel.mesh);
+
+  const v = {
+    lane, isPlayer, matIndex, z,
+    wheelBody, chassisBody, joint,
+    wheelMesh: wheel.mesh, chassisMesh,
+    profile: wheel.profile, radius: wheel.radius,
+    materialiseT: 0,           // >0 means torque is cut (just materialised)
+    finished:false, finishTime:0, mult:1,
+    rubber:1,                  // AI rubber-band factor
+  };
+  configureMotor(v);
+  vehicles.push(v);
+  return v;
+}
+
+function attachWheelCollider(body, wheel){
+  // Convex hull of the extruded shape = cheap & stable physics proxy.
+  let desc = RAPIER.ColliderDesc.convexHull(wheel.hullPts);
+  if (!desc) desc = RAPIER.ColliderDesc.ball(wheel.radius); // degenerate fallback
+  desc.setDensity(1.0).setFriction(1.1).setRestitution(0.0);
+  world.createCollider(desc, body);
+}
+
+function configureMotor(v){
+  // Velocity motor on the hinge; the per-frame target is scaled by the
+  // shape×terrain multiplier (section 7). Negative Z spin → rolls toward +X.
+  try {
+    v.joint.configureMotorModel(RAPIER.MotorModel.ForceBased);
+  } catch(e){ /* older builds: ignore, traction force still drives */ }
+}
+
+/* Swap a vehicle's wheel in place (the redraw). Removes the old wheel body +
+   joint, builds the new one, and starts the materialise (torque-cut) timer. */
+function replaceWheel(v, profilePts){
+  // Tear down old wheel + joint + mesh.
+  world.removeImpulseJoint(v.joint, true);
+  world.removeRigidBody(v.wheelBody);
+  v.wheelMesh.geometry.dispose();
+  scene.remove(v.wheelMesh);
+
+  const wheel = buildWheel(profilePts, WHEEL_MATS[v.matIndex]);
+  const cpos = v.chassisBody.translation();
+  const wheelY = cpos.y - 0.62;
+  const wheelBody = world.createRigidBody(
+    RAPIER.RigidBodyDesc.dynamic().setTranslation(cpos.x, wheelY, v.z)
+      .enabledRotations(false,false,true)
+      .enabledTranslations(true,true,false)
+      .setAngularDamping(0.05).setLinearDamping(0.05));
+  attachWheelCollider(wheelBody, wheel);
+  const joint = world.createImpulseJoint(
+    RAPIER.JointData.revolute(
+      { x:0, y:-0.62, z:0 }, { x:0, y:0, z:0 }, { x:0, y:0, z:1 }),
+    v.chassisBody, wheelBody, true);
+
+  v.wheelBody = wheelBody; v.joint = joint;
+  v.wheelMesh = wheel.mesh; v.profile = wheel.profile; v.radius = wheel.radius;
+  scene.add(wheel.mesh);
+  configureMotor(v);
+  v.materialiseT = MATERIALISE_S;        // pay the cost
+  wheel.mesh.userData.snap = 0.001;      // trigger the "snap-in" scale juice
+}
+
+/* =====================================================================
+   6. AI WHEEL PRESETS  ("fine everywhere, optimal nowhere").
+   ===================================================================== */
+function presetPolygon(sides, jitter, squash){
+  const pts=[];
+  for (let i=0;i<sides;i++){
+    const a = (i/sides)*Math.PI*2;
+    const r = 0.5 * (1 + (Math.random()-0.5)*jitter);
+    pts.push({ x:Math.cos(a)*r, y:Math.sin(a)*r*squash });
+  }
+  // Round-trip through screen space so the AI presets use the exact same
+  // simplify→normalise pipeline as a hand-drawn wheel.
+  const out = normaliseStroke(pts.map(p=>({x:300+p.x*120, y:300-p.y*120})));
+  // Fallback to a clean circle if the jittered polygon degenerated.
+  if (out) return out;
+  const circ=[]; for(let i=0;i<16;i++){ const a=(i/16)*Math.PI*2;
+    circ.push({x:300+Math.cos(a)*60, y:300-Math.sin(a)*60}); }
+  return normaliseStroke(circ);
+}
+
+/* =====================================================================
+   7. DRIVE + RACE STEP  (fixed timestep; multiplier governs target speed).
+   ===================================================================== */
+let player = null;
+let raceStarted = false, raceTime = 0, raceOver = false;
+let bestTime = parseFloat(localStorage.getItem('rtw_best') || '0') || 0;
+
+function driveVehicle(v, dt){
+  const tr = v.chassisBody.translation();
+  const zone = zoneAt(tr.x);
+
+  // ----- THE multiplier in action: shape × terrain × weather. -----
+  const mult = shapeTerrainMultiplier(v.profile, zone.terrain, zone.weather);
+  v.mult = mult;
+
+  // Materialise window: torque is cut, vehicle coasts (the tactical cost).
+  if (v.materialiseT > 0){
+    v.materialiseT -= dt;
+    try { v.joint.configureMotorVelocity(0, 1.0); } catch(e){}
+    return;
+  }
+  if (v.finished) {
+    try { v.joint.configureMotorVelocity(0, 0.5); } catch(e){}
+    return;
+  }
+
+  const targetSpeed = BASE_SPEED * mult * v.rubber;
+
+  // (a) Spec-faithful drive: spin the hinge toward the rolling speed.
+  const targetOmega = -targetSpeed / Math.max(0.25, v.radius);
+  try { v.joint.configureMotorVelocity(targetOmega, 2.5); } catch(e){}
+
+  // (b) Arcade traction: a clamped forward impulse that chases targetSpeed.
+  //     This makes the analytic multiplier *reliably* decide the race instead
+  //     of depending on fickle tyre friction — and lets every shape climb hills.
+  const lv = v.chassisBody.linvel();
+  let f = TRACTION_K * (targetSpeed - lv.x);
+  f = clamp(f, -TRACTION_FMAX, TRACTION_FMAX);
+  v.chassisBody.applyImpulse({ x:f*dt, y:0, z:0 }, true);
+
+  // Speed cap.
+  if (lv.x > SPEED_CAP) v.chassisBody.setLinvel({ x:SPEED_CAP, y:lv.y, z:0 }, true);
+
+  // Clamp wheel spin so the convex hull never explodes the solver.
+  const av = v.wheelBody.angvel();
+  if (Math.abs(av.z) > WHEEL_OMEGA_CAP)
+    v.wheelBody.setAngvel({ x:0, y:0, z:Math.sign(av.z)*WHEEL_OMEGA_CAP }, true);
+}
+
+function updateRubberBanding(){
+  // Light, symmetric rubber-band on the AI only: keep the pack near the player
+  // so the race stays about *shape choice*, not snowballing leads.
+  if (!player) return;
+  const px = player.chassisBody.translation().x;
+  for (const v of vehicles){
+    if (v.isPlayer){ v.rubber = 1; continue; }
+    const gap = px - v.chassisBody.translation().x; // +ve: AI is behind player
+    v.rubber = clamp(1 + gap * 0.012, 0.85, 1.18);
+  }
+}
+
+function stepPhysics(dt){
+  if (raceStarted && !raceOver) raceTime += dt;
+  updateRubberBanding();
+  for (const v of vehicles) driveVehicle(v, dt);
+  world.timestep = dt;
+  world.step();
+
+  // Finish detection + ordering.
+  for (const v of vehicles){
+    if (!v.finished && v.chassisBody.translation().x >= TRACK_LENGTH){
+      v.finished = true; v.finishTime = raceTime;
+      if (v.isPlayer) onPlayerFinish();
+    }
+  }
+}
+
+/* =====================================================================
+   8. CAMERA  — the non-negotiable three-quarter chase cam.
+   Slightly behind (-X), offset to one side (+Z), low-ish (+Y). Smooth lag.
+   Looks at a point just ahead of the player and toward pack centre so the
+   spinning drawn profile AND the AI pack are always framed on a phone.
+   ===================================================================== */
+const camTarget = new THREE.Vector3();
+const camGoal = new THREE.Vector3();
+const lookGoal = new THREE.Vector3();
+const lookCurrent = new THREE.Vector3();
+function updateCamera(dtRender){
+  if (!player) return;
+  const p = player.chassisBody.translation();
+  camGoal.set(p.x - 7.5, p.y + 4.2, p.z + 8.5);          // behind, up, to the side
+  lookGoal.set(p.x + 3.0, p.y + 0.4, p.z - 1.6);          // ahead + toward pack
+  // Critically-ish damped smoothing → that cinematic trailing lag.
+  const k = 1 - Math.pow(0.0016, dtRender);
+  camera.position.lerp(camGoal, k);
+  lookCurrent.lerp(lookGoal, k);
+  camera.lookAt(lookCurrent);
+  sun.position.set(p.x - 6, p.y + 12, p.z + 8);
+  sun.target.position.set(p.x, p.y, p.z);
+  sun.target.updateMatrixWorld();
+}
+
+/* =====================================================================
+   9. SYNC MESHES  — copy physics transforms to Three meshes each render.
+   ===================================================================== */
+const _q = new THREE.Quaternion();
+function syncMeshes(){
+  for (const v of vehicles){
+    const ct = v.chassisBody.translation();
+    v.chassisMesh.position.set(ct.x, ct.y, ct.z);
+    const wt = v.wheelBody.translation(), wr = v.wheelBody.rotation();
+    v.wheelMesh.position.set(wt.x, wt.y, wt.z);
+    v.wheelMesh.quaternion.set(wr.x, wr.y, wr.z, wr.w);
+    // "Snap-in" juice: scale the freshly materialised wheel up from nothing.
+    if (v.wheelMesh.userData.snap !== undefined){
+      let s = v.wheelMesh.userData.snap;
+      s = Math.min(1, s + 0.12);
+      const e = 1 + Math.sin(Math.min(1,s)*Math.PI)*0.18; // little overshoot pop
+      v.wheelMesh.scale.setScalar(s*e);
+      if (s >= 1){ v.wheelMesh.scale.setScalar(1); delete v.wheelMesh.userData.snap; }
+      else v.wheelMesh.userData.snap = s;
+    }
+  }
+}
+
+/* =====================================================================
+   10. UI  — telegraph strip, HUD, gauge, draw overlay, banner.
+   ===================================================================== */
+const stripEl = document.getElementById('strip');
+const progressEl = document.getElementById('progress');
+const posEl = document.getElementById('pos');
+const terrLabelEl = document.getElementById('terrLabel');
+const gaugeFill = document.getElementById('gaugeFill');
+const redrawBtn = document.getElementById('redrawBtn');
+
+function buildStrip(){
+  stripEl.innerHTML = '';
+  for (const z of ZONES){
+    const d = document.createElement('div');
+    d.className = 'zone'; d.dataset.terrain = z.terrain;
+    d.style.flex = z.len;
+    d.style.background = TERRAIN[z.terrain].strip;
+    d.innerHTML = `<span class="w">${WEATHER[z.weather].icon}</span>${TERRAIN[z.terrain].name}`;
+    stripEl.appendChild(d);
+  }
+}
+function updateHUD(){
+  if (!player) return;
+  const px = player.chassisBody.translation().x;
+  // Live position vs pack.
+  let rank = 1;
+  for (const v of vehicles) if (!v.isPlayer && v.chassisBody.translation().x > px) rank++;
+  // Finished racers always rank by finish time.
+  posEl.innerHTML = `${rank}<small>/${vehicles.length}</small>`;
+
+  const zone = zoneAt(px);
+  terrLabelEl.textContent = `${TERRAIN[zone.terrain].name} · ${WEATHER[zone.weather].name}`;
+
+  // Multiplier gauge (0.25…1.6 → 0…100%), green good / red bad.
+  const m = player.mult;
+  const pct = clamp01((m - 0.25)/(1.6 - 0.25)) * 100;
+  gaugeFill.style.width = pct + '%';
+  const hue = clamp01((m - 0.5)/0.9) * 120; // red→green
+  gaugeFill.style.background = `hsl(${hue},75%,52%)`;
+
+  // Progress marker + active-zone highlight on the strip.
+  const prog = clamp01(px / TRACK_LENGTH);
+  progressEl.style.width = (prog*100) + '%';
+  const kids = stripEl.children;
+  for (let i=0;i<ZONES.length;i++)
+    kids[i].classList.toggle('active', ZONES[i] === zone);
+}
+
+// --------- Draw overlay ---------
+const drawLayer = document.getElementById('drawLayer');
+const drawCanvas = document.getElementById('drawCanvas');
+const dctx = drawCanvas.getContext('2d');
+const goBtn = document.getElementById('goBtn');
+const cancelBtn = document.getElementById('cancelBtn');
+let drawing = false, strokePts = [], drawOpen = false;
+
+function sizeDrawCanvas(){
+  const r = Math.min(window.devicePixelRatio||1, 2);
+  drawCanvas.width = window.innerWidth * r;
+  drawCanvas.height = window.innerHeight * r;
+  dctx.setTransform(r,0,0,r,0,0);
+}
+function openDraw(){
+  if (redrawBtn.classList.contains('cooling')) return;
+  drawOpen = true; strokePts = [];
+  sizeDrawCanvas(); renderStroke();
+  drawLayer.classList.add('open');
+  goBtn.disabled = true;
+}
+function closeDraw(){ drawOpen = false; drawLayer.classList.remove('open'); }
+
+function strokeFromEvent(e){
+  const t = e.touches ? e.touches[0] : e;
+  return { x:t.clientX, y:t.clientY };
+}
+function onDrawStart(e){ e.preventDefault(); drawing=true; strokePts=[strokeFromEvent(e)]; renderStroke(); }
+function onDrawMove(e){
+  if(!drawing) return; e.preventDefault();
+  const p = strokeFromEvent(e), last = strokePts[strokePts.length-1];
+  if (!last || Math.hypot(p.x-last.x, p.y-last.y) > 3){ strokePts.push(p); renderStroke(); }
+}
+function onDrawEnd(e){
+  e.preventDefault(); drawing=false;
+  goBtn.disabled = strokePts.length < 4;
+  renderStroke(true);
+}
+function renderStroke(closed){
+  dctx.clearRect(0,0,window.innerWidth,window.innerHeight);
+  if (strokePts.length < 2) return;
+  dctx.lineWidth = 5; dctx.lineJoin='round'; dctx.lineCap='round';
+  dctx.strokeStyle = '#ffd25e'; dctx.fillStyle = '#ffd25e22';
+  dctx.beginPath();
+  dctx.moveTo(strokePts[0].x, strokePts[0].y);
+  for (let i=1;i<strokePts.length;i++) dctx.lineTo(strokePts[i].x, strokePts[i].y);
+  if (closed){ dctx.closePath(); dctx.fill(); }
+  dctx.stroke();
+}
+drawCanvas.addEventListener('pointerdown', onDrawStart);
+drawCanvas.addEventListener('pointermove', onDrawMove);
+window.addEventListener('pointerup', onDrawEnd);
+
+cancelBtn.addEventListener('click', closeDraw);
+goBtn.addEventListener('click', () => {
+  const pts = normaliseStroke(strokePts.map(p => ({ x:p.x, y:p.y })));
+  if (!pts){ goBtn.disabled = true; return; }
+  replaceWheel(player, pts);
+  closeDraw();
+  startCooldown();
+});
+redrawBtn.addEventListener('click', openDraw);
+
+function startCooldown(){
+  // Brief lockout so the redraw is tactical, not spammable.
+  redrawBtn.classList.add('cooling');
+  setTimeout(() => redrawBtn.classList.remove('cooling'), 1400);
+}
+
+// --------- Result banner ---------
+const banner = document.getElementById('banner');
+const bannerTitle = document.getElementById('bannerTitle');
+const bannerText = document.getElementById('bannerText');
+const bannerCard = document.getElementById('bannerCard');
+document.getElementById('restartBtn').addEventListener('click', resetRace);
+
+function onPlayerFinish(){
+  raceOver = true;
+  // Final standings = finished order, then current X for the unfinished.
+  const standings = [...vehicles].sort((a,b)=>{
+    if (a.finished && b.finished) return a.finishTime - b.finishTime;
+    if (a.finished) return -1; if (b.finished) return 1;
+    return b.chassisBody.translation().x - a.chassisBody.translation().x;
+  });
+  const place = standings.indexOf(player) + 1;
+  const won = place === 1;
+  bannerTitle.textContent = won ? '🏆 You win!' : `Finished ${ordinal(place)}`;
+  bannerText.textContent = won
+    ? 'You read the terrain and drew the right wheel at the right time.'
+    : 'Try redrawing for the surface you struggled on — match the shape to the ground.';
+
+  let pb = '';
+  if (!bestTime || raceTime < bestTime){ bestTime = raceTime;
+    localStorage.setItem('rtw_best', String(bestTime)); pb = '  ⭐ new best!'; }
+  bannerCard.innerHTML =
+    `Your time: <b>${raceTime.toFixed(1)}s</b>${pb}<br>` +
+    `Best: <b>${bestTime.toFixed(1)}s</b><br>` +
+    standings.map((v,i)=>`${i+1}. ${v.isPlayer?'<b>You</b>':'AI '+v.matIndex}`).join(' &nbsp;·&nbsp; ');
+  banner.classList.add('open');
+}
+function ordinal(n){
+  const s=['th','st','nd','rd'], v=n%100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
+}
+
+function resetRace(){
+  banner.classList.remove('open');
+  raceTime = 0; raceOver = false; raceStarted = true;
+  for (const v of vehicles){
+    v.finished = false; v.finishTime = 0; v.rubber = 1;
+    const wy = v.radius + 0.05;
+    v.wheelBody.setTranslation({ x:1.5, y:wy, z:v.z }, true);
+    v.wheelBody.setLinvel({x:0,y:0,z:0}, true);
+    v.wheelBody.setAngvel({x:0,y:0,z:0}, true);
+    v.chassisBody.setTranslation({ x:1.5, y:wy+0.62, z:v.z }, true);
+    v.chassisBody.setLinvel({x:0,y:0,z:0}, true);
+  }
+  // Re-stagger the start a touch so the pack reads nicely.
+  vehicles.forEach((v,i)=>{
+    const wy = v.radius + 0.05;
+    v.chassisBody.setTranslation({ x:1.5 - i*0.6, y:wy+0.62, z:v.z }, true);
+    v.wheelBody.setTranslation({ x:1.5 - i*0.6, y:wy, z:v.z }, true);
+  });
+}
+
+/* =====================================================================
+   11. MAIN LOOP  — fixed-timestep physics, decoupled render.
+   ===================================================================== */
+let last = performance.now(), acc = 0;
+function loop(now){
+  requestAnimationFrame(loop);
+  let frame = (now - last)/1000; last = now;
+  if (frame > 0.1) frame = 0.1;             // tab-switch guard
+  const scale = drawOpen ? DRAW_TIMESCALE : 1; // slow-mo while drawing
+  acc += frame * scale;
+
+  let steps = 0;
+  while (acc >= FIXED_DT && steps < MAX_SUBSTEPS){
+    stepPhysics(FIXED_DT); acc -= FIXED_DT; steps++;
+  }
+  if (steps === MAX_SUBSTEPS) acc = 0;      // drop the backlog
+
+  syncMeshes();
+  updateCamera(frame);
+  updateHUD();
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (drawOpen) { sizeDrawCanvas(); renderStroke(strokePts.length>3); }
+});
+
+/* =====================================================================
+   12. BOOT
+   ===================================================================== */
+async function main(){
+  await RAPIER.init();                         // decode inline wasm
+  world = new RAPIER.World({ x:0, y:GRAVITY, z:0 });
+  world.numSolverIterations = 6;
+
+  buildStrip();
+  buildTrack();
+  buildFinish();
+
+  // Player starts on a neutral roundish wheel; redraw to adapt.
+  const startPoly = presetPolygon(20, 0.05, 1.0);
+  player = makeVehicle({ lane:0, isPlayer:true, matIndex:0, profilePts:startPoly });
+
+  // 3 AI: "fine everywhere, optimal nowhere" — slightly faceted, slightly treaded.
+  makeVehicle({ lane:1, isPlayer:false, matIndex:1, profilePts:presetPolygon(8, 0.18, 1.0) });
+  makeVehicle({ lane:2, isPlayer:false, matIndex:2, profilePts:presetPolygon(11, 0.12, 0.95) });
+  makeVehicle({ lane:3, isPlayer:false, matIndex:3, profilePts:presetPolygon(9, 0.22, 1.05) });
+
+  raceStarted = true;
+  document.getElementById('boot').remove();
+  requestAnimationFrame(loop);
+}
+
+main().catch(err => {
+  console.error(err);
+  const boot = document.getElementById('boot');
+  boot.classList.add('err');
+  boot.querySelector('.errmsg').textContent =
+    'Engine failed to start: ' + (err && err.message ? err.message : err);
+});
+</script>
+</body>
+</html>
