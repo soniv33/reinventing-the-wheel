@@ -4,13 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#0c1018" />
+<meta name="description" content="Draw your wheel, read the terrain, outrun the pack — a 3D physics racer in one HTML file." />
+<meta property="og:title" content="Reinventing the Wheel" />
+<meta property="og:description" content="A 3D side-on physics racer where you draw your wheels by hand. Shape decides speed." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x2699;</text></svg>">
 <title>Reinventing the Wheel</title>
 <style>
-  /* ---------------------------------------------------------------------
-     Layout: a full-screen WebGL canvas with DOM overlays on top.
-     All interactive controls live near the bottom so they're thumb-reachable
-     on a phone held in portrait or landscape.
-  --------------------------------------------------------------------- */
   :root {
     --tarmac:#4a4f5a; --sand:#d9b15e; --mud:#6e4d2e; --rocky:#7d7f86;
     --ice:#a9e0f2; --hill:#5f8f4f; --good:#46d36a; --bad:#e0533d;
@@ -22,24 +21,29 @@
   #app { position:fixed; inset:0; }
   canvas { display:block; width:100%; height:100%; }
 
-  /* Top telegraph strip: upcoming terrain + weather so the player can plan. */
   #strip { position:fixed; top:0; left:0; right:0; height:46px; display:flex;
     padding:6px 8px; gap:4px; align-items:stretch; pointer-events:none;
-    background:linear-gradient(#0c1018cc,#0c101800); }
+    background:linear-gradient(#0c1018cc,#0c101800); z-index:5; }
   .zone { flex:1; border-radius:7px; position:relative; display:flex;
     flex-direction:column; justify-content:center; align-items:center;
     font-size:10px; font-weight:700; letter-spacing:.3px; color:#0c1018e0;
     overflow:hidden; box-shadow:inset 0 0 0 1px #ffffff22; min-width:0; }
   .zone span.w { font-size:13px; line-height:1; }
   .zone.active { box-shadow:inset 0 0 0 2px #fff, 0 0 10px #fff8; }
-  #progress { position:fixed; top:46px; left:0; height:3px; background:#fff;
-    width:0; box-shadow:0 0 8px #fff; transition:width .1s linear; }
 
-  /* HUD: position + multiplier gauge. */
-  #hud { position:fixed; left:10px; top:56px; display:flex; flex-direction:column;
-    gap:8px; pointer-events:none; }
+  #raceBar { position:fixed; top:46px; left:0; right:0; height:10px;
+    background:#ffffff08; z-index:5; }
+  #progress { position:absolute; top:0; left:0; height:3px; background:#fff;
+    width:0; box-shadow:0 0 8px #fff; transition:width .1s linear; }
+  .car-dot { position:absolute; width:8px; height:8px; border-radius:50%;
+    top:1px; transform:translateX(-50%); transition:left .15s linear;
+    box-shadow:0 0 4px currentColor; }
+
+  #hud { position:fixed; left:10px; top:62px; display:flex; flex-direction:column;
+    gap:6px; pointer-events:none; z-index:5; }
   #pos { font-size:30px; font-weight:800; line-height:1; text-shadow:0 2px 6px #000a; }
   #pos small { font-size:14px; opacity:.7; font-weight:600; }
+  #timer { font-size:14px; font-weight:700; opacity:.8; font-variant-numeric:tabular-nums; }
   #terrLabel { font-size:12px; font-weight:700; opacity:.9; text-shadow:0 1px 4px #000a; }
   #gaugeWrap { width:150px; }
   #gaugeLabel { font-size:10px; opacity:.75; margin-bottom:2px; font-weight:600;
@@ -48,17 +52,20 @@
     overflow:hidden; box-shadow:inset 0 0 0 1px #ffffff22; }
   #gaugeFill { height:100%; width:50%; border-radius:6px; transition:width .15s, background .15s; }
 
-  /* Redraw button: large, bottom-centre. */
+  #muteBtn { position:fixed; top:4px; right:8px; z-index:10; background:none; border:none;
+    color:#fff8; font-size:18px; cursor:pointer; padding:8px; pointer-events:auto; }
+
   #redrawBtn { position:fixed; bottom:max(18px,env(safe-area-inset-bottom));
     left:50%; transform:translateX(-50%); padding:15px 30px; border:none;
     border-radius:30px; font-size:17px; font-weight:800; letter-spacing:.5px;
     color:#0c1018; background:linear-gradient(#ffd25e,#ffb020);
     box-shadow:0 6px 18px #0008, inset 0 1px 0 #fff8; cursor:pointer;
-    pointer-events:auto; }
+    pointer-events:auto; z-index:10; display:none; }
   #redrawBtn:active { transform:translateX(-50%) scale(.95); }
   #redrawBtn.cooling { background:linear-gradient(#5a6172,#444a58); color:#ffffff66; }
+  #redrawBtn.hint { animation:pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{box-shadow:0 6px 18px #0008} 50%{box-shadow:0 6px 18px #ffd25e66, 0 0 24px #ffd25e44} }
 
-  /* Draw overlay: a 2D sketch surface that opens over the (slowed) game. */
   #drawLayer { position:fixed; inset:0; display:none; z-index:20;
     background:radial-gradient(circle at 50% 42%, #11203aee, #060a12f4);
     backdrop-filter:blur(2px); }
@@ -66,10 +73,10 @@
   #drawCanvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none; }
   #drawHint { position:fixed; top:calc(env(safe-area-inset-top) + 14px); left:0; right:0;
     text-align:center; font-size:14px; font-weight:600; opacity:.92;
-    pointer-events:none; padding:0 20px; line-height:1.4; }
+    pointer-events:none; padding:0 20px; line-height:1.4; z-index:21; }
   #drawHint b { color:#ffd25e; }
   #drawBtns { position:fixed; bottom:max(20px,env(safe-area-inset-bottom));
-    left:0; right:0; display:flex; gap:12px; justify-content:center; padding:0 16px; }
+    left:0; right:0; display:flex; gap:12px; justify-content:center; padding:0 16px; z-index:21; }
   #drawBtns button { flex:1; max-width:200px; padding:15px; border:none;
     border-radius:26px; font-size:16px; font-weight:800; cursor:pointer; }
   #goBtn { background:linear-gradient(#46d36a,#2faa4f); color:#04210d;
@@ -77,7 +84,6 @@
   #goBtn:disabled { filter:grayscale(.7) brightness(.7); }
   #cancelBtn { background:#ffffff1a; color:#fff; box-shadow:inset 0 0 0 1px #fff3; }
 
-  /* Result / message banner. */
   #banner { position:fixed; inset:0; display:none; z-index:30; flex-direction:column;
     align-items:center; justify-content:center; gap:14px; text-align:center;
     background:#060a12e0; padding:24px; }
@@ -86,13 +92,46 @@
     text-shadow:0 4px 18px #000; }
   #banner p { margin:0; opacity:.85; font-size:15px; max-width:340px; line-height:1.5; }
   #banner .card { background:#141b29; border-radius:14px; padding:16px 22px;
-    box-shadow:inset 0 0 0 1px #ffffff14; font-size:14px; line-height:1.7; }
+    box-shadow:inset 0 0 0 1px #ffffff14; font-size:13px; line-height:1.8; max-width:380px; }
   #banner button { margin-top:6px; padding:14px 32px; border:none; border-radius:28px;
     font-size:17px; font-weight:800; color:#0c1018;
     background:linear-gradient(#ffd25e,#ffb020); box-shadow:0 6px 18px #0008; cursor:pointer; }
 
-  /* Boot / loading screen. */
-  #boot { position:fixed; inset:0; z-index:40; display:flex; flex-direction:column;
+  #title { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; background:#0c1018e0;
+    text-align:center; padding:24px; backdrop-filter:blur(4px); }
+  #title.hidden { display:none; }
+  #title h1 { font-size:clamp(26px,6vw,48px); margin:0; letter-spacing:2px;
+    background:linear-gradient(135deg,#ffd25e,#ff8a3c,#ffd25e);
+    background-size:200% 200%; -webkit-background-clip:text;
+    background-clip:text; color:transparent; animation:shimmer 3s ease-in-out infinite; }
+  @keyframes shimmer { 0%,100%{background-position:0% 50%} 50%{background-position:100% 50%} }
+  #title .tagline { font-size:clamp(13px,2.5vw,17px); opacity:.65; margin:0;
+    max-width:340px; line-height:1.5; }
+  #startBtn { padding:18px 52px; border:none; border-radius:32px; font-size:20px;
+    font-weight:900; letter-spacing:1px; color:#0c1018; margin-top:8px;
+    background:linear-gradient(135deg,#ffd25e,#ffb020); cursor:pointer;
+    box-shadow:0 8px 28px #ffd25e44; transition:transform .15s; }
+  #startBtn:active { transform:scale(.94); }
+  #title .tip { font-size:12px; opacity:.4; max-width:280px; line-height:1.5; margin-top:4px; }
+  #title .tip b { color:#ffd25e; opacity:1; }
+  #titleBest { font-size:13px; opacity:.55; margin:0; }
+
+  #countdownEl { position:fixed; inset:0; z-index:35; display:none; align-items:center;
+    justify-content:center; pointer-events:none; }
+  #countdownEl.active { display:flex; }
+  #countdownEl span { font-size:clamp(60px,18vw,130px); font-weight:900; color:#ffd25e;
+    text-shadow:0 0 40px #ffd25e66, 0 4px 20px #000a; animation:countPop .65s ease-out; }
+  @keyframes countPop { 0%{transform:scale(2.2);opacity:0} 25%{opacity:1} 100%{transform:scale(1);opacity:1} }
+
+  #posChange { position:fixed; right:14px; top:62px; font-size:18px; font-weight:800;
+    opacity:0; transition:opacity .3s; pointer-events:none; z-index:6;
+    text-shadow:0 2px 6px #000a; }
+  #posChange.show { opacity:1; }
+  #posChange.up { color:var(--good); }
+  #posChange.down { color:var(--bad); }
+
+  #boot { position:fixed; inset:0; z-index:60; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:18px; background:#0c1018;
     text-align:center; padding:24px; }
   #boot h1 { font-size:30px; margin:0; letter-spacing:1px;
@@ -106,57 +145,62 @@
   #boot .errmsg { color:#e0533d; font-size:13px; display:none; }
   #boot.err .errmsg { display:block; }
   .flash { animation:flash .5s ease-out; }
-  @keyframes flash { 0%{filter:brightness(2.4) saturate(0);} 100%{filter:none;} }
+  @keyframes flash { 0%{filter:brightness(2.4) saturate(0)} 100%{filter:none} }
 </style>
 </head>
 <body>
 <div id="app"></div>
 
-<!-- Top telegraph strip + progress marker -->
 <div id="strip"></div>
-<div id="progress"></div>
+<div id="raceBar"><div id="progress"></div></div>
 
-<!-- HUD -->
 <div id="hud">
   <div id="pos">1<small>/4</small></div>
+  <div id="timer">0.0s</div>
   <div id="terrLabel">TARMAC</div>
   <div id="gaugeWrap">
-    <div id="gaugeLabel">Wheel × Terrain</div>
+    <div id="gaugeLabel">Wheel &times; Terrain</div>
     <div id="gauge"><div id="gaugeFill"></div></div>
   </div>
 </div>
 
-<button id="redrawBtn">✎ REDRAW WHEEL</button>
+<button id="muteBtn" title="Toggle sound">&#x1f50a;</button>
+<button id="redrawBtn">&#x270e; REDRAW</button>
 
-<!-- Draw overlay -->
 <div id="drawLayer">
   <canvas id="drawCanvas"></canvas>
-  <div id="drawHint">Sketch your wheel's <b>side profile</b> — one closed loop.<br>Round = fast &amp; smooth · Spiky = grips mud/ice · Wide = floats on sand</div>
+  <div id="drawHint">Sketch your wheel's <b>side profile</b> &mdash; one closed loop.<br>Round = fast on tarmac &middot; Spiky = grips mud/ice &middot; Wide = floats on sand</div>
   <div id="drawBtns">
     <button id="cancelBtn">Cancel</button>
     <button id="goBtn" disabled>Materialise</button>
   </div>
 </div>
 
-<!-- Result banner -->
 <div id="banner">
   <h1 id="bannerTitle">Finish</h1>
   <p id="bannerText"></p>
   <div class="card" id="bannerCard"></div>
-  <button id="restartBtn">Race again</button>
+  <button id="restartBtn">Race Again</button>
 </div>
 
-<!-- Boot screen -->
+<div id="title">
+  <h1>Reinventing the Wheel</h1>
+  <p class="tagline">Draw your wheel. Read the terrain. Outrun the pack.</p>
+  <p id="titleBest"></p>
+  <button id="startBtn">START RACE</button>
+  <p class="tip">Tap <b>REDRAW</b> mid-race to sketch a new wheel shaped for the terrain ahead</p>
+</div>
+
+<div id="countdownEl"></div>
+<div id="posChange"></div>
+
 <div id="boot">
   <h1>Reinventing the Wheel</h1>
   <div class="spin"></div>
-  <div class="sub">Loading physics &amp; renderer…<br>Draw a wheel, race the pack.</div>
-  <div class="errmsg">Couldn't start the engine. Check your connection (CDN/WASM) and reload.</div>
+  <div class="sub">Loading physics &amp; renderer&hellip;<br>Draw a wheel, race the pack.</div>
+  <div class="errmsg">Couldn't start the engine. Check your connection and reload.</div>
 </div>
 
-<!-- ESM import map: Three.js for rendering, Rapier3D (compat = inline wasm) for physics.
-     No build step, no bundler. The "compat" Rapier build base64-encodes its wasm so a
-     single static file works on GitHub Pages and on phones without a separate .wasm fetch. -->
 <script type="importmap">
 {
   "imports": {
@@ -171,126 +215,99 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 
 /* =====================================================================
-   0. TUNING CONSTANTS  — balance lives here, deliberately up top.
+   0. TUNING CONSTANTS
    ===================================================================== */
-const FIXED_DT      = 1/60;     // physics timestep (decoupled from render)
-const MAX_SUBSTEPS  = 5;        // clamp catch-up so a stall can't spiral
-const GRAVITY       = -22;      // arcade-strong gravity for snappy feel
-const BASE_SPEED    = 9.0;      // target m/s of a "neutral" wheel (mult = 1.0)
-const TRACTION_K    = 60;       // how hard we chase target speed (arcade traction)
-const TRACTION_FMAX = 110;      // cap on traction impulse force
-const SPEED_CAP     = 16;       // hard cap on forward velocity
-const MATERIALISE_S = 1.2;      // drive-cut delay after a redraw (the cost)
-const DRAW_TIMESCALE= 0.15;     // slow-mo factor while the draw overlay is open
-const TRACK_LENGTH  = 320;      // finish line X
-const LANES_Z       = [2.7, 0.9, -0.9, -2.7]; // player first (closest to cam)
-// Car geometry. All wheels share ONE fixed radius so the physics body never
-// changes when you redraw — only the wheel's *shape* (and thus the multiplier)
-// changes. WHEELBASE/TRACK place the four visual wheels at the body corners.
-const WHEEL_R       = 0.5;      // fixed outer wheel radius (visual + spin maths)
-const WHEELBASE     = 0.9;      // front/rear wheel offset from car centre (±X)
-const TRACK_W       = 0.42;     // left/right wheel offset from lane centre (±Z)
-const MAX_TILT      = 0.5;      // clamp car pitch (rad) so it can never flip
+const FIXED_DT       = 1/60;
+const MAX_SUBSTEPS   = 5;
+const GRAVITY        = -22;
+const BASE_SPEED     = 9.5;
+const TRACTION_K     = 65;
+const TRACTION_FMAX  = 120;
+const SPEED_CAP      = 17;
+const MATERIALISE_S  = 1.0;
+const DRAW_TIMESCALE = 0.12;
+const WHEEL_R        = 0.5;
+const WHEELBASE      = 0.9;
+const TRACK_W        = 0.42;
+const MAX_TILT       = 0.5;
+const LANES_Z        = [2.7, 0.9, -0.9, -2.7];
+const COUNTDOWN_S    = 3.0;
+const PARTICLE_MAX   = 200;
+
+const AI_DRIVERS = [
+  { name:'Blaze', skill:0.82, reaction:1.0 },
+  { name:'Drift', skill:0.70, reaction:1.6 },
+  { name:'Frost', skill:0.58, reaction:2.2 },
+];
+const OPTIMAL_SHAPES = {
+  tarmac:{ sides:22, jitter:0.03, squash:1.0 },
+  sand:  { sides:18, jitter:0.04, squash:0.55 },
+  mud:   { sides:6,  jitter:0.38, squash:1.0 },
+  rocky: { sides:7,  jitter:0.28, squash:0.78 },
+  ice:   { sides:5,  jitter:0.45, squash:1.0 },
+  hill:  { sides:7,  jitter:0.32, squash:0.88 },
+};
+
+let ZONES = [];
+let TRACK_LENGTH = 320;
 
 /* =====================================================================
-   1.  ███  THE HEART OF THE GAME  ███
-   geometryToProfile() reads three shape properties off a drawn polygon,
-   and shapeTerrainMultiplier() turns (profile × terrain × weather) into a
-   single speed multiplier. Everything balance-related is in THIS section
-   and nowhere else, so tuning never means hunting through physics code.
+   1. THE HEART OF THE GAME
    ===================================================================== */
-
-/* Read the three gameplay-relevant properties off a normalised 2D polygon
-   (centroid already at origin, scaled to a fixed radius — see normaliseStroke).
-     • roundness  ∈[0,1]  1 = perfect circle, 0 = wildly irregular
-     • tread      ∈[0,1]  spikiness: radial variance + vertex detail
-     • width      ∈[0,1]  footprint: how wide/squat vs tall/narrow
-   These are intentionally simple, monotonic, and independent so the
-   terrain formulas below read like plain English. */
-function geometryToProfile(pts) {
+function geometryToProfile(pts){
   const n = pts.length;
-  // Radii from the centroid (which is at the origin after normalisation).
   let meanR = 0;
   const radii = pts.map(p => Math.hypot(p.x, p.y));
   for (const r of radii) meanR += r;
   meanR /= n;
-  // Coefficient of variation of the radii = how "not-a-circle" the outline is.
   let varSum = 0;
   for (const r of radii) varSum += (r - meanR) * (r - meanR);
   const cv = meanR > 1e-5 ? Math.sqrt(varSum / n) / meanR : 0;
-
-  // Bounding box → aspect ratio → footprint width.
   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
   for (const p of pts){ if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x;
                         if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y; }
   const bw = maxX-minX, bh = Math.max(1e-5, maxY-minY);
-  const aspect = bw/bh;                       // >1 = wide & squat
-
-  const roundness = clamp01(1 - cv * 2.2);             // circle → 1
-  const tread     = clamp01(cv * 1.7 + (n/24) * 0.55); // jagged & detailed → 1
-  const width     = clamp01((aspect - 0.7) / (1.7 - 0.7)); // squat → 1
-
+  const aspect = bw/bh;
+  const roundness = clamp01(1 - cv * 2.2);
+  const tread     = clamp01(cv * 1.7 + (n/24) * 0.55);
+  const width     = clamp01((aspect - 0.7) / (1.7 - 0.7));
   return { roundness, tread, width, cv, verts:n, aspect };
 }
 
-/* Terrain catalogue. `key` drives the analytic formula; the rest is presentation
-   (colour for the ground + telegraph strip, friendly name). */
 const TERRAIN = {
-  tarmac: { name:'TARMAC', color:0x4a4f5a, strip:'#4a4f5a' },
-  sand:   { name:'SAND',   color:0xd9b15e, strip:'#d9b15e' },
-  mud:    { name:'MUD',    color:0x6e4d2e, strip:'#6e4d2e' },
-  rocky:  { name:'ROCKY',  color:0x7d7f86, strip:'#7d7f86' },
-  ice:    { name:'ICE',    color:0xa9e0f2, strip:'#a9e0f2' },
-  hill:   { name:'HILL',   color:0x5f8f4f, strip:'#5f8f4f' },
+  tarmac:{ name:'TARMAC', color:0x4a4f5a, strip:'#4a4f5a' },
+  sand:  { name:'SAND',   color:0xd9b15e, strip:'#d9b15e' },
+  mud:   { name:'MUD',    color:0x6e4d2e, strip:'#6e4d2e' },
+  rocky: { name:'ROCKY',  color:0x7d7f86, strip:'#7d7f86' },
+  ice:   { name:'ICE',    color:0xa9e0f2, strip:'#a9e0f2' },
+  hill:  { name:'HILL',   color:0x5f8f4f, strip:'#5f8f4f' },
 };
 const WEATHER = {
-  dry:  { name:'Dry',  icon:'☀' },
-  rain: { name:'Rain', icon:'🌧' },
-  snow: { name:'Snow', icon:'❄' },
-  heat: { name:'Heat', icon:'🔥' },
+  dry: { name:'Dry', icon:'☀' },
+  rain:{ name:'Rain',icon:'🌧' },
+  snow:{ name:'Snow',icon:'❄' },
+  heat:{ name:'Heat',icon:'🔥' },
 };
 
-/* THE formula. Returns a speed/grip multiplier (≈0.25 slow … 1.6 fast).
-   Each terrain is one readable line describing its winning shape, exactly
-   per the design brief. Keep the additive form — it's trivial to retune. */
-function shapeTerrainMultiplier(profile, terrainKey, weatherKey) {
+function shapeTerrainMultiplier(profile, terrainKey, weatherKey){
   const { roundness, tread, width } = profile;
   let m;
-  switch (terrainKey) {
-    // Smooth round rolls fast on hard tarmac; tread just wastes energy.
-    case 'tarmac':
-      m = 0.70 + 0.65*roundness - 0.35*tread; break;
-    // Dunes: a wide fat smooth wheel floats; narrow/spiky knifes in and sinks.
-    case 'sand':
-      m = 0.60 + 0.65*width + 0.30*roundness - 0.55*tread; break;
-    // Mud: treaded/gear-like wheel bites; a smooth circle just spins out.
-    case 'mud':
-      m = 0.58 + 0.75*tread - 0.35*roundness; break;
-    // Rocky: a larger flat-faced polygon rolls over; a tiny smooth wheel jams.
-    case 'rocky':
-      m = 0.60 + 0.50*tread + 0.40*width - 0.25*roundness; break;
-    // Ice: studs/spikes grip; a round wheel slides helplessly.
-    case 'ice':
-      m = 0.55 + 0.85*tread - 0.45*roundness; break;
-    // Hill climb: wants grip + bite, mild help from a broad footprint.
-    case 'hill':
-      m = 0.58 + 0.70*tread + 0.20*width - 0.10*roundness; break;
-    default:
-      m = 1.0;
+  switch(terrainKey){
+    case 'tarmac': m = 0.70 + 0.65*roundness - 0.35*tread; break;
+    case 'sand':   m = 0.60 + 0.65*width + 0.30*roundness - 0.55*tread; break;
+    case 'mud':    m = 0.58 + 0.75*tread - 0.35*roundness; break;
+    case 'rocky':  m = 0.60 + 0.50*tread + 0.40*width - 0.25*roundness; break;
+    case 'ice':    m = 0.55 + 0.85*tread - 0.45*roundness; break;
+    case 'hill':   m = 0.58 + 0.70*tread + 0.20*width - 0.10*roundness; break;
+    default: m = 1.0;
   }
-
-  /* Weather modifies the *active* segment (also commented inline so the
-     interaction with each surface is obvious). */
-  switch (weatherKey) {
+  switch(weatherKey){
     case 'rain':
-      // Wet tarmac loses grip → the round-wheel advantage evaporates.
       if (terrainKey === 'tarmac') m -= 0.30 * roundness;
       m -= 0.05; break;
     case 'snow':
-      // A snow overlay rewards tread on top of whatever's underneath.
       m += 0.25*tread - 0.20*roundness; break;
     case 'heat':
-      // Heat bakes mud hard & fast → it starts behaving like tarmac (round wins).
       if (terrainKey === 'mud') m += 0.40*roundness - 0.30*tread;
       break;
   }
@@ -301,16 +318,13 @@ function clamp(v,a,b){ return v<a?a:v>b?b:v; }
 function clamp01(v){ return v<0?0:v>1?1:v; }
 
 /* =====================================================================
-   2. DRAWING PIPELINE: raw stroke → simplify → close → normalise → Shape.
+   2. DRAWING PIPELINE
    ===================================================================== */
-
-/* Douglas–Peucker polyline simplification (recursive). Keeps the silhouette
-   that matters and throws away the jitter of a finger drag. */
-function douglasPeucker(points, eps) {
+function douglasPeucker(points, eps){
   if (points.length < 3) return points.slice();
   let dmax = 0, idx = 0;
   const a = points[0], b = points[points.length-1];
-  for (let i=1; i<points.length-1; i++){
+  for (let i=1;i<points.length-1;i++){
     const d = perpDist(points[i], a, b);
     if (d > dmax){ dmax = d; idx = i; }
   }
@@ -332,34 +346,20 @@ function shoelaceArea(pts){
     s += pts[i].x*pts[j].y - pts[j].x*pts[i].y; } return Math.abs(s)/2;
 }
 
-/* Turn raw screen-space stroke points into a clean, normalised wheel polygon.
-   Normalisation to a constant outer radius is what stops "draw it huge" or
-   "draw it microscopic" from breaking balance — only the *shape* survives. */
 function normaliseStroke(raw){
   if (raw.length < 3) return null;
-  // Simplify relative to the stroke's own size so it scales with screen DPI.
   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
   for(const p of raw){ if(p.x<minX)minX=p.x;if(p.x>maxX)maxX=p.x;
                        if(p.y<minY)minY=p.y;if(p.y>maxY)maxY=p.y; }
   const span = Math.max(maxX-minX, maxY-minY, 1);
   let pts = douglasPeucker(raw, span * 0.02);
-  // Drop a duplicate closing point if present, need ≥3 distinct verts.
   if (pts.length>1){ const f=pts[0], l=pts[pts.length-1];
     if (Math.hypot(f.x-l.x,f.y-l.y) < span*0.03) pts.pop(); }
   if (pts.length < 3) return null;
-
-  // Flip Y (screen y is down) and centre on centroid.
   let cx=0, cy=0; for(const p of pts){ cx+=p.x; cy+=p.y; }
   cx/=pts.length; cy/=pts.length;
   pts = pts.map(p => ({ x:(p.x-cx), y:-(p.y-cy) }));
-
-  // Reject degenerate strokes.
   if (shoelaceArea(pts) < 1e-4) return null;
-
-  // Normalise to a constant OUTER RADIUS. Uniform scaling leaves all three
-  // shape metrics (roundness / tread / width) untouched, so balance is decided
-  // purely by SHAPE — and every wheel ends the same size, which means the car's
-  // physics body never has to change when you redraw. Big vs tiny is neutralised.
   let r=0; for(const p of pts) r=Math.max(r, Math.hypot(p.x,p.y));
   if (r < 1e-4) return null;
   const s = WHEEL_R / r;
@@ -367,27 +367,20 @@ function normaliseStroke(raw){
   return pts;
 }
 
-/* Build the extruded wheel GEOMETRY from a normalised profile. One geometry is
-   shared by all four of a car's wheels (cheap; redraw just swaps it in). The
-   profile metrics ride along so the drive code can read shape × terrain.
-   depth (axle width) tracks the footprint so wide drawings look fat. */
 function buildWheelGeometry(pts2d){
   const profile = geometryToProfile(pts2d);
-  const depth = 0.26 + 0.30 * profile.width;     // axle-direction thickness
-
+  const depth = 0.26 + 0.30 * profile.width;
   const shape = new THREE.Shape(pts2d.map(p => new THREE.Vector2(p.x, p.y)));
   const geom = new THREE.ExtrudeGeometry(shape, {
     depth, bevelEnabled:false, steps:1, curveSegments:2,
   });
-  geom.translate(0, 0, -depth/2);   // centre on the axle
+  geom.translate(0, 0, -depth/2);
   geom.computeVertexNormals();
   geom.userData.profile = profile;
   geom.userData.depth = depth;
   return geom;
 }
 
-/* A single wheel = the drawn geometry + a contrasting hub bar (so spin reads
-   even on a near-perfect circle). Returns a Group we can spin about its axle. */
 function makeWheelMesh(geom, material){
   const g = new THREE.Group();
   g.add(new THREE.Mesh(geom, material));
@@ -397,11 +390,11 @@ function makeWheelMesh(geom, material){
 }
 
 /* =====================================================================
-   3. THREE.JS SCENE  (flat / low-poly, two lights, capped DPR).
+   3. THREE.JS SCENE
    ===================================================================== */
 const container = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); // phone cap
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x0c1018);
 container.appendChild(renderer.domElement);
@@ -412,20 +405,18 @@ scene.fog = new THREE.Fog(0x0c1018, 40, 110);
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 400);
 camera.position.set(-7, 5, 8);
 
-// Minimal lighting: one directional + ambient (per perf brief).
 scene.add(new THREE.AmbientLight(0x9fb4d8, 0.75));
 const sun = new THREE.DirectionalLight(0xfff2d8, 1.25);
 sun.position.set(-6, 12, 8);
 scene.add(sun);
 
-// Shared materials / geometry — reuse keeps draw calls + allocations low.
 const HUB_MAT     = new THREE.MeshStandardMaterial({ color:0x202531, flatShading:true, roughness:.9 });
-const HUB_GEO     = new THREE.BoxGeometry(0.07, WHEEL_R*1.4, 0.62); // spin marker bar
-const BODY_GEO    = new THREE.BoxGeometry(WHEELBASE*2 + 0.5, 0.26, TRACK_W*2 + 0.1); // chassis bar
-const CABIN_GEO   = new THREE.BoxGeometry(1.05, 0.42, TRACK_W*2 - 0.1);              // cabin
+const HUB_GEO     = new THREE.BoxGeometry(0.07, WHEEL_R*1.4, 0.62);
+const BODY_GEO    = new THREE.BoxGeometry(WHEELBASE*2 + 0.5, 0.26, TRACK_W*2 + 0.1);
+const CABIN_GEO   = new THREE.BoxGeometry(1.05, 0.42, TRACK_W*2 - 0.1);
 const DRIVER_GEO  = new THREE.SphereGeometry(0.16, 8, 6);
 const WHEEL_MATS  = [
-  new THREE.MeshStandardMaterial({ color:0xffce4a, flatShading:true, roughness:.6 }), // player
+  new THREE.MeshStandardMaterial({ color:0xffce4a, flatShading:true, roughness:.6 }),
   new THREE.MeshStandardMaterial({ color:0xe0573d, flatShading:true, roughness:.7 }),
   new THREE.MeshStandardMaterial({ color:0x49a0e6, flatShading:true, roughness:.7 }),
   new THREE.MeshStandardMaterial({ color:0x9b6cd8, flatShading:true, roughness:.7 }),
@@ -434,52 +425,130 @@ const BODY_MATS = WHEEL_MATS.map(m => new THREE.MeshStandardMaterial(
   { color:m.color.clone().multiplyScalar(0.85), flatShading:true, roughness:.8 }));
 const CABIN_MATS = WHEEL_MATS.map(m => new THREE.MeshStandardMaterial(
   { color:m.color.clone().multiplyScalar(0.6), flatShading:true, roughness:.85 }));
-// The four wheel mounting points in body-local space (front/rear × left/right).
 const WHEEL_MOUNTS = [
   { x: WHEELBASE, z: TRACK_W }, { x: WHEELBASE, z:-TRACK_W },
   { x:-WHEELBASE, z: TRACK_W }, { x:-WHEELBASE, z:-TRACK_W },
 ];
 
+// --- Particle system ---
+const pPositions  = new Float32Array(PARTICLE_MAX * 3);
+const pColors     = new Float32Array(PARTICLE_MAX * 3);
+const pBaseColors = new Float32Array(PARTICLE_MAX * 3);
+const pVel        = new Float32Array(PARTICLE_MAX * 3);
+const pLife       = new Float32Array(PARTICLE_MAX);
+let pHead = 0;
+for (let i = 0; i < PARTICLE_MAX; i++) { pPositions[i*3+1] = -999; pLife[i] = 0; }
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pColors, 3));
+const pMat = new THREE.PointsMaterial({
+  size:0.22, vertexColors:true, transparent:true, opacity:0.75,
+  depthWrite:false, sizeAttenuation:true,
+});
+const particleMesh = new THREE.Points(pGeo, pMat);
+scene.add(particleMesh);
+
+function spawnParticle(x,y,z, vx,vy,vz, r,g,b){
+  const i = pHead; pHead = (pHead+1) % PARTICLE_MAX;
+  pPositions[i*3]=x; pPositions[i*3+1]=y; pPositions[i*3+2]=z;
+  pVel[i*3]=vx; pVel[i*3+1]=vy; pVel[i*3+2]=vz;
+  pBaseColors[i*3]=r; pBaseColors[i*3+1]=g; pBaseColors[i*3+2]=b;
+  pColors[i*3]=r; pColors[i*3+1]=g; pColors[i*3+2]=b;
+  pLife[i] = 1.0;
+}
+
+function updateParticles(dt){
+  for (let i=0; i<PARTICLE_MAX; i++){
+    if (pLife[i] <= 0) continue;
+    pLife[i] -= dt * 2.0;
+    if (pLife[i] <= 0){ pPositions[i*3+1] = -999; continue; }
+    pPositions[i*3]   += pVel[i*3]*dt;
+    pPositions[i*3+1] += pVel[i*3+1]*dt;
+    pPositions[i*3+2] += pVel[i*3+2]*dt;
+    pVel[i*3+1] -= 5*dt;
+    const f = pLife[i];
+    pColors[i*3]   = pBaseColors[i*3]*f;
+    pColors[i*3+1] = pBaseColors[i*3+1]*f;
+    pColors[i*3+2] = pBaseColors[i*3+2]*f;
+  }
+  pGeo.attributes.position.needsUpdate = true;
+  pGeo.attributes.color.needsUpdate = true;
+}
+
+function burstParticles(x,y,z, count, color){
+  const [r,g,b] = color || [1, 0.82, 0.36];
+  for (let i=0; i<count; i++){
+    const a = Math.random()*Math.PI*2;
+    const sp = 1.5 + Math.random()*3;
+    spawnParticle(x, y+0.3, z,
+      Math.cos(a)*sp, Math.random()*3+1, Math.sin(a)*sp,
+      r*(0.7+Math.random()*0.3), g*(0.7+Math.random()*0.3), b*(0.7+Math.random()*0.3));
+  }
+}
+
 /* =====================================================================
-   4. PHYSICS WORLD + TRACK
+   4. TRACK
    ===================================================================== */
 let world;
+const trackObjects = [];
+const GROUND_Z = 9;
 
-// The track as data: contiguous terrain zones along +X, each with weather.
-const ZONES = [
-  { terrain:'tarmac', weather:'dry',  len:42 },
-  { terrain:'sand',   weather:'heat', len:46 },
-  { terrain:'mud',    weather:'dry',  len:44 },
-  { terrain:'rocky',  weather:'dry',  len:46 },
-  { terrain:'ice',    weather:'snow', len:44 },
-  { terrain:'hill',   weather:'dry',  len:50 },
-  { terrain:'tarmac', weather:'rain', len:48 },
-];
-// Resolve absolute start/end X for each zone.
-(function layoutZones(){
+function weatherForTerrain(terrain){
+  const w = {
+    tarmac:{dry:5,rain:3,snow:1,heat:1},
+    sand:  {dry:3,rain:1,snow:0,heat:4},
+    mud:   {dry:3,rain:4,snow:1,heat:2},
+    rocky: {dry:4,rain:2,snow:2,heat:1},
+    ice:   {dry:2,rain:1,snow:5,heat:0},
+    hill:  {dry:4,rain:3,snow:1,heat:1},
+  }[terrain] || {dry:1};
+  const keys = Object.keys(w);
+  let total = 0; for (const k of keys) total += w[k];
+  let r = Math.random()*total;
+  for (const k of keys){ r -= w[k]; if (r <= 0) return k; }
+  return 'dry';
+}
+
+function generateZones(){
+  const terrains = ['sand','mud','rocky','ice','hill'];
+  for (let i = terrains.length-1; i > 0; i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [terrains[i], terrains[j]] = [terrains[j], terrains[i]];
+  }
+  const zones = [];
+  zones.push({ terrain:'tarmac', weather:'dry', len:30 + Math.random()*8 });
+  let last = 'tarmac';
+  for (const t of terrains){
+    zones.push({ terrain:t, weather:weatherForTerrain(t), len:26 + Math.random()*16 });
+    last = t;
+  }
+  const extras = 2 + Math.floor(Math.random()*2);
+  const pool = ['tarmac','sand','mud','rocky','ice','hill'];
+  for (let i=0; i<extras; i++){
+    let t; do { t = pool[Math.floor(Math.random()*pool.length)]; } while (t === last);
+    zones.push({ terrain:t, weather:weatherForTerrain(t), len:24 + Math.random()*14 });
+    last = t;
+  }
+  zones.push({ terrain:'tarmac', weather:'dry', len:26 + Math.random()*8 });
   let x = 0;
-  for (const z of ZONES){ z.start = x; x += z.len; z.end = x; }
-  ZONES.totalLen = x;
-})();
+  for (const z of zones){ z.start = x; x += z.len; z.end = x; }
+  zones.totalLen = x;
+  return zones;
+}
+
 function zoneAt(x){
   for (const z of ZONES) if (x >= z.start && x < z.end) return z;
   return x < 0 ? ZONES[0] : ZONES[ZONES.length-1];
 }
 
-const trackMeshes = [];
-const GROUND_Z = 9;             // half-width of the ground ribbon (covers all lanes)
-
-/* Terrain height profile h(x): flat almost everywhere, with a smooth hump in
-   the hill zone and gentle ripples in the rocky zone. Continuous (no lips), so
-   the car box rides over it cleanly — no walls to slam into. */
 function heightAt(x){
   let h = 0;
   for (const z of ZONES){
     if (x < z.start || x > z.end) continue;
-    const t = (x - z.start) / (z.end - z.start);   // 0..1 across the zone
-    if (z.terrain === 'hill')  h += 1.7 * Math.sin(Math.PI * t);             // one smooth hill
+    const t = (x - z.start) / (z.end - z.start);
+    if (z.terrain === 'hill')  h += 1.7 * Math.sin(Math.PI * t);
     if (z.terrain === 'rocky') h += Math.sin(Math.PI*t) * 0.16 *
-        (Math.sin(x*1.7) + 0.6*Math.sin(x*3.1 + 1));                          // low ripples
+        (Math.sin(x*1.7) + 0.6*Math.sin(x*3.1 + 1));
   }
   return h;
 }
@@ -487,26 +556,24 @@ function hexToRGB(hex){ return [((hex>>16)&255)/255, ((hex>>8)&255)/255, (hex&25
 function groundColor(x){
   const z = zoneAt(x);
   let c = hexToRGB(TERRAIN[z.terrain].color);
-  if (z.weather === 'snow') c = c.map(v => v*0.4 + 0.6);     // whiten
-  if (z.weather === 'rain') c = c.map((v,i)=> v*0.7 + [0.06,0.10,0.16][i]); // darken/blue
+  if (z.weather === 'snow') c = c.map(v => v*0.4 + 0.6);
+  if (z.weather === 'rain') c = c.map((v,i)=> v*0.7 + [0.06,0.10,0.16][i]);
   return c;
 }
 
 function buildTrack(){
-  // Build ONE low-poly trimesh ribbon for both physics and render.
   const x0 = -20, x1 = TRACK_LENGTH + 30, dx = 1.0;
   const verts = [], colors = []; const idx = [];
   let cols = 0;
   for (let x = x0; x <= x1; x += dx, cols++){
     const y = heightAt(x), c = groundColor(x);
-    verts.push(x, y, -GROUND_Z,  x, y, GROUND_Z);    // back & front vertices
-    colors.push(c[0],c[1],c[2],  c[0],c[1],c[2]);
+    verts.push(x, y, -GROUND_Z, x, y, GROUND_Z);
+    colors.push(c[0],c[1],c[2], c[0],c[1],c[2]);
   }
-  for (let i = 0; i < cols-1; i++){
-    const a = 2*i, b = 2*i+1, c = 2*i+2, d = 2*i+3;  // a,b this column · c,d next
-    idx.push(a, b, c,  b, d, c);                      // wind so face normals point up
+  for (let i=0; i<cols-1; i++){
+    const a=2*i, b=2*i+1, c=2*i+2, d=2*i+3;
+    idx.push(a, b, c, b, d, c);
   }
-  // Render mesh (flat-shaded, vertex-coloured, double-sided so no dark backfaces).
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -514,69 +581,59 @@ function buildTrack(){
   geo.computeVertexNormals();
   const groundMesh = new THREE.Mesh(geo,
     new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:true, roughness:.98, side:THREE.DoubleSide }));
-  scene.add(groundMesh); trackMeshes.push(groundMesh);
-  // Dark filler block beneath so the thin ribbon never shows daylight underneath.
+  scene.add(groundMesh); trackObjects.push(groundMesh);
+
   const base = new THREE.Mesh(
     new THREE.BoxGeometry(x1-x0, 8, GROUND_Z*2),
     new THREE.MeshStandardMaterial({ color:0x0a0e16, flatShading:true }));
-  base.position.set((x0+x1)/2, -4.2, 0); scene.add(base); trackMeshes.push(base);
+  base.position.set((x0+x1)/2, -4.2, 0); scene.add(base); trackObjects.push(base);
 
-  // Physics: the same ribbon as a static trimesh collider.
   const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
   const tri = RAPIER.ColliderDesc.trimesh(new Float32Array(verts), new Uint32Array(idx));
   if (tri) world.createCollider(tri.setFriction(1.0), body);
-  // Safety net floor far below, in case the trimesh ever misbehaves.
   world.createCollider(
     RAPIER.ColliderDesc.cuboid((x1-x0)/2, 0.4, GROUND_Z).setFriction(1.0)
       .setTranslation((x0+x1)/2, -1.2, 0), body);
 }
 
-// Finish line marker (visual only; crossing is detected by X).
 function buildFinish(){
   const y = heightAt(TRACK_LENGTH);
   const mat = new THREE.MeshStandardMaterial({ color:0xffffff, flatShading:true });
-  const a = new THREE.Mesh(new THREE.BoxGeometry(0.3, 6, 0.3), mat); a.position.set(TRACK_LENGTH, y+3, GROUND_Z-1);
-  const b = new THREE.Mesh(new THREE.BoxGeometry(0.3, 6, 0.3), mat); b.position.set(TRACK_LENGTH, y+3, -(GROUND_Z-1));
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.5, GROUND_Z*2), mat); bar.position.set(TRACK_LENGTH, y+5.7, 0);
+  const a = new THREE.Mesh(new THREE.BoxGeometry(0.3, 6, 0.3), mat);
+  a.position.set(TRACK_LENGTH, y+3, GROUND_Z-1);
+  const b = new THREE.Mesh(new THREE.BoxGeometry(0.3, 6, 0.3), mat);
+  b.position.set(TRACK_LENGTH, y+3, -(GROUND_Z-1));
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.5, GROUND_Z*2), mat);
+  bar.position.set(TRACK_LENGTH, y+5.7, 0);
   scene.add(a, b, bar);
+  trackObjects.push(a, b, bar);
 }
 
 /* =====================================================================
-   5. VEHICLES  (a 4-wheel car: ONE drawn profile, applied to all four wheels)
-
-   Design note on robustness: the wheels are *visual* and spun deterministically
-   from the car's speed, while a single box collider does the ground physics.
-   The shape's effect on speed/grip is analytic (section 1), exactly per the
-   brief — so we don't need (fragile) per-wheel joints or motors. Result: the
-   wheels ALWAYS visibly roll and the car ALWAYS drives.
+   5. VEHICLES
    ===================================================================== */
 const vehicles = [];
-const SPAWN_Y = WHEEL_R;        // body origin sits at axle height; box bottom = ground
+const SPAWN_Y = WHEEL_R;
 
-function makeCar({ lane, isPlayer, matIndex, profilePts }){
+function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
   const z = LANES_Z[lane];
-  const spawnX = 1.5 - lane * 0.5;            // slight stagger so the pack reads
+  const spawnX = 1.5 - lane * 0.5;
 
-  // --- One car body. Box collider from ground (y=0) up to ~2R. Locked to its
-  //     lane (Z), allowed only to pitch (rotate about Z) for ramp feel. ---
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic().setTranslation(spawnX, SPAWN_Y, z)
-      .enabledTranslations(true, true, false)   // lock Z → stay in lane
-      .enabledRotations(false, false, true)     // only pitch in the side plane
+      .enabledTranslations(true, true, false)
+      .enabledRotations(false, false, true)
       .setAngularDamping(3.0).setLinearDamping(0.1));
   world.createCollider(
     RAPIER.ColliderDesc.cuboid(WHEELBASE + 0.35, WHEEL_R, TRACK_W + 0.03)
-      .setDensity(0.3).setFriction(0.6).setRestitution(0.0),
-    body);
+      .setDensity(0.3).setFriction(0.6).setRestitution(0.0), body);
 
-  // --- Visual car: a Group we drive each frame to match the body. ---
   const group = new THREE.Group();
-  const bar = new THREE.Mesh(BODY_GEO, BODY_MATS[matIndex]);  bar.position.y = 0.12;
+  const chassis = new THREE.Mesh(BODY_GEO, BODY_MATS[matIndex]); chassis.position.y = 0.12;
   const cabin = new THREE.Mesh(CABIN_GEO, CABIN_MATS[matIndex]); cabin.position.set(-0.1, 0.42, 0);
   const driver = new THREE.Mesh(DRIVER_GEO, HUB_MAT); driver.position.set(-0.1, 0.66, 0);
-  group.add(bar, cabin, driver);
+  group.add(chassis, cabin, driver);
 
-  // Four wheels share one geometry; each is a Group we rotate about its axle.
   const geom = buildWheelGeometry(profilePts);
   const wheels = WHEEL_MOUNTS.map(mt => {
     const w = makeWheelMesh(geom, WHEEL_MATS[matIndex]);
@@ -589,32 +646,36 @@ function makeCar({ lane, isPlayer, matIndex, profilePts }){
   const v = {
     lane, isPlayer, matIndex, z, body, group, wheels, geom,
     profile: geom.userData.profile,
-    spinAngle: 0,
-    materialiseT: 0,           // >0 → drive cut (just materialised a new wheel)
-    snap: 1,                   // wheel "snap-in" scale (1 = settled)
-    finished:false, finishTime:0, mult:1,
-    rubber:1,                  // AI rubber-band factor
+    spinAngle:0, materialiseT:0, snap:1,
+    finished:false, finishTime:0, mult:1, rubber:1,
+    aiName: ai ? ai.name : null,
+    aiSkill: ai ? ai.skill : 0,
+    aiReaction: ai ? ai.reaction : 0,
+    aiCurrentZone: null,
+    aiSwapTimer: -1,
+    lastZoneIdx: -1,
+    zoneTimes: {},
   };
   vehicles.push(v);
   return v;
 }
 
-/* Swap a car's wheel profile (the redraw): rebuild the shared geometry, drop it
-   into all four wheels, and start the materialise (drive-cut) cost + snap juice.
-   The physics body is untouched — every wheel is the same fixed size. */
 function replaceWheel(v, profilePts){
   const old = v.geom;
   const geom = buildWheelGeometry(profilePts);
-  for (const w of v.wheels) w.children[0].geometry = geom;  // mesh is child 0
+  for (const w of v.wheels) w.children[0].geometry = geom;
   if (old && old !== geom) old.dispose();
   v.geom = geom;
   v.profile = geom.userData.profile;
-  v.materialiseT = MATERIALISE_S;   // pay the cost
-  v.snap = 0.001;                   // trigger the snap-in pop
+  v.materialiseT = MATERIALISE_S;
+  v.snap = 0.001;
+  const t = v.body.translation();
+  burstParticles(t.x, t.y, t.z, 20);
+  playMaterialise();
 }
 
 /* =====================================================================
-   6. AI WHEEL PRESETS  ("fine everywhere, optimal nowhere").
+   6. AI SYSTEM
    ===================================================================== */
 function presetPolygon(sides, jitter, squash){
   const pts=[];
@@ -623,82 +684,103 @@ function presetPolygon(sides, jitter, squash){
     const r = 0.5 * (1 + (Math.random()-0.5)*jitter);
     pts.push({ x:Math.cos(a)*r, y:Math.sin(a)*r*squash });
   }
-  // Round-trip through screen space so the AI presets use the exact same
-  // simplify→normalise pipeline as a hand-drawn wheel.
   const out = normaliseStroke(pts.map(p=>({x:300+p.x*120, y:300-p.y*120})));
-  // Fallback to a clean circle if the jittered polygon degenerated.
   if (out) return out;
   const circ=[]; for(let i=0;i<16;i++){ const a=(i/16)*Math.PI*2;
     circ.push({x:300+Math.cos(a)*60, y:300-Math.sin(a)*60}); }
   return normaliseStroke(circ);
 }
 
+function aiPresetForTerrain(terrain, skill){
+  const opt = OPTIMAL_SHAPES[terrain];
+  const neutral = { sides:12, jitter:0.15, squash:1.0 };
+  const sides = Math.round(opt.sides * skill + neutral.sides * (1-skill));
+  const jitter = opt.jitter * skill + neutral.jitter * (1-skill);
+  const squash = opt.squash * skill + neutral.squash * (1-skill);
+  return presetPolygon(sides, jitter, squash);
+}
+
 /* =====================================================================
-   7. DRIVE + RACE STEP  (fixed timestep; multiplier governs target speed).
+   7. DRIVE + RACE STEP
    ===================================================================== */
 let player = null;
 let raceStarted = false, raceTime = 0, raceOver = false;
+let countdownActive = false, countdownTimer = 0, countdownShown = -1;
 let bestTime = parseFloat(localStorage.getItem('rtw_best') || '0') || 0;
 
 function driveVehicle(v, dt){
   const tr = v.body.translation();
   const zone = zoneAt(tr.x);
 
-  // ----- THE multiplier in action: shape × terrain × weather. -----
+  // Track zone entry times
+  const zIdx = ZONES.indexOf(zone);
+  if (zIdx !== v.lastZoneIdx){
+    v.lastZoneIdx = zIdx;
+    if (!(zIdx in v.zoneTimes)) v.zoneTimes[zIdx] = raceTime;
+  }
+
+  // AI wheel swapping
+  if (!v.isPlayer && v.aiSkill > 0){
+    if (zone !== v.aiCurrentZone){
+      v.aiCurrentZone = zone;
+      v.aiSwapTimer = v.aiReaction * (0.8 + Math.random()*0.4);
+    }
+    if (v.aiSwapTimer > 0){
+      v.aiSwapTimer -= dt;
+      if (v.aiSwapTimer <= 0){
+        const pts = aiPresetForTerrain(zone.terrain, v.aiSkill);
+        replaceWheel(v, pts);
+      }
+    }
+  }
+
   const mult = shapeTerrainMultiplier(v.profile, zone.terrain, zone.weather);
   v.mult = mult;
-
   const lv = v.body.linvel();
 
-  // Drive is cut during the materialise window and after finishing → the car
-  // coasts and slows. This is the tactical cost of a redraw.
+  if (countdownActive){
+    if (Math.abs(lv.x) > 0.1) v.body.setLinvel({ x:0, y:lv.y, z:0 }, true);
+    return;
+  }
+
   const driving = v.materialiseT <= 0 && !v.finished;
   if (v.materialiseT > 0) v.materialiseT -= dt;
 
   if (driving){
-    // Arcade traction: a clamped forward impulse that chases a target speed set
-    // purely by the shape×terrain multiplier. Deterministic — the analytic
-    // formula decides the race, and every shape can still climb the hill.
     const targetSpeed = BASE_SPEED * mult * v.rubber;
     let f = TRACTION_K * (targetSpeed - lv.x);
     f = clamp(f, -TRACTION_FMAX, TRACTION_FMAX);
     v.body.applyImpulse({ x:f*dt, y:0, z:0 }, true);
   }
 
-  // Forward speed cap.
   if (lv.x > SPEED_CAP) v.body.setLinvel({ x:SPEED_CAP, y:lv.y, z:0 }, true);
 
-  // Hard anti-flip: clamp the car's pitch so a bump/ramp can never tip it over.
-  const rot = v.body.rotation();                 // quaternion, only Z is free
+  const rot = v.body.rotation();
   const ang = 2 * Math.atan2(rot.z, rot.w);
   if (Math.abs(ang) > MAX_TILT){
     const c = clamp(ang, -MAX_TILT, MAX_TILT);
     v.body.setRotation({ x:0, y:0, z:Math.sin(c/2), w:Math.cos(c/2) }, true);
     const av = v.body.angvel();
-    v.body.setAngvel({ x:0, y:0, z: av.z*0.2 }, true);
+    v.body.setAngvel({ x:0, y:0, z:av.z*0.2 }, true);
   }
 }
 
 function updateRubberBanding(){
-  // Light, symmetric rubber-band on the AI only: keep the pack near the player
-  // so the race stays about *shape choice*, not snowballing leads.
   if (!player) return;
   const px = player.body.translation().x;
   for (const v of vehicles){
     if (v.isPlayer){ v.rubber = 1; continue; }
-    const gap = px - v.body.translation().x; // +ve: AI is behind player
-    v.rubber = clamp(1 + gap * 0.012, 0.85, 1.18);
+    const gap = px - v.body.translation().x;
+    v.rubber = clamp(1 + gap * 0.010, 0.90, 1.12);
   }
 }
 
 function stepPhysics(dt){
-  if (raceStarted && !raceOver) raceTime += dt;
+  if (raceStarted && !raceOver && !countdownActive) raceTime += dt;
   updateRubberBanding();
   for (const v of vehicles) driveVehicle(v, dt);
   world.timestep = dt;
   world.step();
-
-  // Finish detection + ordering.
   for (const v of vehicles){
     if (!v.finished && v.body.translation().x >= TRACK_LENGTH){
       v.finished = true; v.finishTime = raceTime;
@@ -708,64 +790,142 @@ function stepPhysics(dt){
 }
 
 /* =====================================================================
-   8. CAMERA  — the non-negotiable three-quarter chase cam.
-   Slightly behind (-X), offset to one side (+Z), low-ish (+Y). Smooth lag.
-   Looks at a point just ahead of the player and toward pack centre so the
-   spinning drawn profile AND the AI pack are always framed on a phone.
+   8. CAMERA
    ===================================================================== */
 const camTarget = new THREE.Vector3();
 const camGoal = new THREE.Vector3();
 const lookGoal = new THREE.Vector3();
 const lookCurrent = new THREE.Vector3();
+let shakeIntensity = 0;
+let baseFov = 55;
+
+function triggerShake(intensity){ shakeIntensity = Math.max(shakeIntensity, intensity); }
+
 function updateCamera(dtRender){
   if (!player) return;
+
+  // Title screen / pre-race: slow dolly along track
+  if (!raceStarted){
+    const t = performance.now() * 0.00008;
+    const tx = (t % 1) * TRACK_LENGTH * 0.6;
+    camera.position.set(tx - 6, 5, 12);
+    lookCurrent.set(tx + 8, heightAt(tx) + 1, 0);
+    camera.lookAt(lookCurrent);
+    camera.fov = 55;
+    camera.updateProjectionMatrix();
+    return;
+  }
+
   const p = player.body.translation();
-  camGoal.set(p.x - 8.0, p.y + 4.6, p.z + 9.5);          // behind, up, to the side
-  lookGoal.set(p.x + 3.0, p.y + 0.3, p.z - 2.4);          // ahead + toward pack
-  // Critically-ish damped smoothing → that cinematic trailing lag.
+  camGoal.set(p.x - 8.0, p.y + 4.6, p.z + 9.5);
+  lookGoal.set(p.x + 3.0, p.y + 0.3, p.z - 2.4);
   const k = 1 - Math.pow(0.0016, dtRender);
   camera.position.lerp(camGoal, k);
   lookCurrent.lerp(lookGoal, k);
   camera.lookAt(lookCurrent);
+
+  // FOV rush at high speed
+  const speed = Math.abs(player.body.linvel().x);
+  const speedRatio = Math.min(speed / SPEED_CAP, 1);
+  camera.fov = baseFov + speedRatio * 10;
+  camera.updateProjectionMatrix();
+
+  // Camera shake
+  if (shakeIntensity > 0.001){
+    camera.position.x += (Math.random()-0.5) * shakeIntensity * 0.4;
+    camera.position.y += (Math.random()-0.5) * shakeIntensity * 0.25;
+    shakeIntensity *= Math.pow(0.001, dtRender * 6);
+  }
+
   sun.position.set(p.x - 6, p.y + 12, p.z + 8);
   sun.target.position.set(p.x, p.y, p.z);
   sun.target.updateMatrixWorld();
 }
 
 /* =====================================================================
-   9. SYNC MESHES  — copy physics transforms to Three, spin the wheels.
-   Wheel spin is derived straight from forward speed (ω = v/r), so the wheels
-   ALWAYS roll at the right rate regardless of the physics solver.
+   9. SYNC MESHES + PARTICLE SPAWNING
    ===================================================================== */
+let prevPlayerZone = null;
+let gFrameDt = 0;
+
 function syncMeshes(frameDt){
+  gFrameDt = frameDt;
   for (const v of vehicles){
     const t = v.body.translation(), r = v.body.rotation();
     v.group.position.set(t.x, t.y, t.z);
-    v.group.quaternion.set(r.x, r.y, r.z, r.w);   // carries the pitch on ramps
+    v.group.quaternion.set(r.x, r.y, r.z, r.w);
 
-    // Roll all four wheels from the car's forward velocity.
     const vx = v.body.linvel().x;
-    v.spinAngle -= (vx * frameDt) / WHEEL_R;       // −X spin rolls toward +X
+    v.spinAngle -= (vx * frameDt) / WHEEL_R;
     for (const w of v.wheels) w.rotation.z = v.spinAngle;
 
-    // "Snap-in" juice: scale the freshly materialised wheels up from nothing.
     if (v.snap < 1){
       v.snap = Math.min(1, v.snap + frameDt * 6);
-      const e = v.snap >= 1 ? 1 : 1 + Math.sin(v.snap*Math.PI)*0.18; // pop
+      const e = v.snap >= 1 ? 1 : 1 + Math.sin(v.snap*Math.PI)*0.18;
       for (const w of v.wheels) w.scale.setScalar(v.snap*e);
+    }
+
+    // Dust particles from rear wheels while driving
+    if (raceStarted && !countdownActive && Math.abs(vx) > 2 && Math.random() < 0.45){
+      const zone = zoneAt(t.x);
+      const [cr,cg,cb] = hexToRGB(TERRAIN[zone.terrain].color);
+      const rot2 = v.body.rotation();
+      const ang = 2 * Math.atan2(rot2.z, rot2.w);
+      const rx = t.x - WHEELBASE * Math.cos(ang);
+      const ry = t.y - WHEELBASE * Math.sin(ang);
+      for (const zOff of [TRACK_W, -TRACK_W]){
+        spawnParticle(
+          rx + (Math.random()-0.5)*0.3,
+          ry + Math.random()*0.15,
+          t.z + zOff + (Math.random()-0.5)*0.2,
+          -vx*0.2 + (Math.random()-0.5)*1.2,
+          Math.random()*2,
+          (Math.random()-0.5)*1,
+          cr*(0.5+Math.random()*0.5),
+          cg*(0.5+Math.random()*0.5),
+          cb*(0.5+Math.random()*0.5)
+        );
+      }
+    }
+  }
+
+  // Terrain transition shake + detection for player
+  if (player && raceStarted){
+    const zone = zoneAt(player.body.translation().x);
+    if (zone !== prevPlayerZone && prevPlayerZone !== null){
+      triggerShake(0.18);
+      playTerrainSwitch();
+    }
+    prevPlayerZone = zone;
+
+    // Continuous small shake on rocky terrain
+    if (zone.terrain === 'rocky' && Math.abs(player.body.linvel().x) > 3){
+      triggerShake(0.03);
     }
   }
 }
 
 /* =====================================================================
-   10. UI  — telegraph strip, HUD, gauge, draw overlay, banner.
+   10. UI
    ===================================================================== */
-const stripEl = document.getElementById('strip');
-const progressEl = document.getElementById('progress');
-const posEl = document.getElementById('pos');
-const terrLabelEl = document.getElementById('terrLabel');
-const gaugeFill = document.getElementById('gaugeFill');
-const redrawBtn = document.getElementById('redrawBtn');
+const stripEl       = document.getElementById('strip');
+const progressEl    = document.getElementById('progress');
+const raceBar       = document.getElementById('raceBar');
+const posEl         = document.getElementById('pos');
+const timerEl       = document.getElementById('timer');
+const terrLabelEl   = document.getElementById('terrLabel');
+const gaugeFill     = document.getElementById('gaugeFill');
+const redrawBtn     = document.getElementById('redrawBtn');
+const posChangeEl   = document.getElementById('posChange');
+const countdownEl   = document.getElementById('countdownEl');
+const muteBtn       = document.getElementById('muteBtn');
+const titleEl       = document.getElementById('title');
+const titleBestEl   = document.getElementById('titleBest');
+const startBtn      = document.getElementById('startBtn');
+
+let carDots = [];
+let lastRank = 1;
+let posChangeTimer = 0;
 
 function buildStrip(){
   stripEl.innerHTML = '';
@@ -778,39 +938,127 @@ function buildStrip(){
     stripEl.appendChild(d);
   }
 }
+
+function createCarDots(){
+  for (const d of carDots) d.remove();
+  carDots = [];
+  const cols = ['#ffce4a','#e0573d','#49a0e6','#9b6cd8'];
+  for (let i=0; i<vehicles.length; i++){
+    const d = document.createElement('div');
+    d.className = 'car-dot';
+    d.style.color = cols[i]; d.style.background = cols[i];
+    raceBar.appendChild(d);
+    carDots.push(d);
+  }
+}
+
 function updateHUD(){
-  if (!player) return;
+  if (!player || !raceStarted) return;
   const px = player.body.translation().x;
-  // Live position vs pack.
+
+  // Position
   let rank = 1;
   for (const v of vehicles) if (!v.isPlayer && v.body.translation().x > px) rank++;
-  // Finished racers always rank by finish time.
   posEl.innerHTML = `${rank}<small>/${vehicles.length}</small>`;
 
-  const zone = zoneAt(px);
-  terrLabelEl.textContent = `${TERRAIN[zone.terrain].name} · ${WEATHER[zone.weather].name}`;
+  // Position change callout
+  if (rank !== lastRank && !countdownActive){
+    const gained = rank < lastRank;
+    posChangeEl.textContent = gained ? ('↑ ' + ordinal(rank)) : ('↓ ' + ordinal(rank));
+    posChangeEl.className = 'show ' + (gained ? 'up' : 'down');
+    posChangeTimer = 2.0;
+    if (gained) playPositionUp();
+    lastRank = rank;
+  }
+  if (posChangeTimer > 0){
+    posChangeTimer -= gFrameDt;
+    if (posChangeTimer <= 0) posChangeEl.className = '';
+  }
 
-  // Multiplier gauge (0.25…1.6 → 0…100%), green good / red bad.
+  // Timer
+  timerEl.textContent = raceTime.toFixed(1) + 's';
+
+  // Terrain label with upcoming preview
+  const zone = zoneAt(px);
+  const distToEnd = zone.end - px;
+  const zIdx = ZONES.indexOf(zone);
+  if (distToEnd < 18 && zIdx < ZONES.length - 1){
+    const next = ZONES[zIdx+1];
+    terrLabelEl.textContent = `${TERRAIN[zone.terrain].name} → ${TERRAIN[next.terrain].name}`;
+  } else {
+    terrLabelEl.textContent = `${TERRAIN[zone.terrain].name} · ${WEATHER[zone.weather].name}`;
+  }
+
+  // Gauge
   const m = player.mult;
   const pct = clamp01((m - 0.25)/(1.6 - 0.25)) * 100;
   gaugeFill.style.width = pct + '%';
-  const hue = clamp01((m - 0.5)/0.9) * 120; // red→green
+  const hue = clamp01((m - 0.5)/0.9) * 120;
   gaugeFill.style.background = `hsl(${hue},75%,52%)`;
 
-  // Progress marker + active-zone highlight on the strip.
+  // Progress + minimap dots
   const prog = clamp01(px / TRACK_LENGTH);
   progressEl.style.width = (prog*100) + '%';
+  for (let i=0; i<vehicles.length && i<carDots.length; i++){
+    const vx = vehicles[i].body.translation().x;
+    carDots[i].style.left = (clamp01(vx / TRACK_LENGTH)*100) + '%';
+  }
+
+  // Active zone highlight
   const kids = stripEl.children;
-  for (let i=0;i<ZONES.length;i++)
+  for (let i=0; i<ZONES.length && i<kids.length; i++)
     kids[i].classList.toggle('active', ZONES[i] === zone);
+
+  // Redraw hint when wheel is bad for terrain
+  if (m < 0.65 && !drawOpen && !redrawBtn.classList.contains('cooling')){
+    redrawBtn.classList.add('hint');
+  } else {
+    redrawBtn.classList.remove('hint');
+  }
+
+  // Show/hide redraw button
+  redrawBtn.style.display = (raceStarted && !countdownActive && !raceOver) ? '' : 'none';
+}
+
+// --------- Countdown ---------
+function startCountdown(){
+  countdownActive = true;
+  countdownTimer = COUNTDOWN_S;
+  countdownShown = -1;
+  countdownEl.classList.add('active');
+  countdownEl.innerHTML = '';
+  raceStarted = true;
+  raceTime = 0;
+  raceOver = false;
+  lastRank = 1;
+  prevPlayerZone = null;
+  playCountdownBeeps();
+}
+
+function updateCountdown(dt){
+  if (!countdownActive) return;
+  countdownTimer -= dt;
+  const num = Math.ceil(Math.max(0, countdownTimer));
+  if (num !== countdownShown){
+    countdownShown = num;
+    if (num > 0){
+      countdownEl.innerHTML = `<span>${num}</span>`;
+    } else {
+      countdownEl.innerHTML = `<span style="color:var(--good)">GO!</span>`;
+    }
+  }
+  if (countdownTimer <= -0.6){
+    countdownActive = false;
+    countdownEl.classList.remove('active');
+  }
 }
 
 // --------- Draw overlay ---------
-const drawLayer = document.getElementById('drawLayer');
+const drawLayer  = document.getElementById('drawLayer');
 const drawCanvas = document.getElementById('drawCanvas');
-const dctx = drawCanvas.getContext('2d');
-const goBtn = document.getElementById('goBtn');
-const cancelBtn = document.getElementById('cancelBtn');
+const dctx       = drawCanvas.getContext('2d');
+const goBtn      = document.getElementById('goBtn');
+const cancelBtn  = document.getElementById('cancelBtn');
 let drawing = false, strokePts = [], drawOpen = false;
 
 function sizeDrawCanvas(){
@@ -821,6 +1069,7 @@ function sizeDrawCanvas(){
 }
 function openDraw(){
   if (redrawBtn.classList.contains('cooling')) return;
+  if (!raceStarted || countdownActive || raceOver) return;
   drawOpen = true; strokePts = [];
   sizeDrawCanvas(); renderStroke();
   drawLayer.classList.add('open');
@@ -869,21 +1118,19 @@ goBtn.addEventListener('click', () => {
 redrawBtn.addEventListener('click', openDraw);
 
 function startCooldown(){
-  // Brief lockout so the redraw is tactical, not spammable.
   redrawBtn.classList.add('cooling');
   setTimeout(() => redrawBtn.classList.remove('cooling'), 1400);
 }
 
 // --------- Result banner ---------
-const banner = document.getElementById('banner');
+const banner      = document.getElementById('banner');
 const bannerTitle = document.getElementById('bannerTitle');
-const bannerText = document.getElementById('bannerText');
-const bannerCard = document.getElementById('bannerCard');
+const bannerText  = document.getElementById('bannerText');
+const bannerCard  = document.getElementById('bannerCard');
 document.getElementById('restartBtn').addEventListener('click', resetRace);
 
 function onPlayerFinish(){
   raceOver = true;
-  // Final standings = finished order, then current X for the unfinished.
   const standings = [...vehicles].sort((a,b)=>{
     if (a.finished && b.finished) return a.finishTime - b.finishTime;
     if (a.finished) return -1; if (b.finished) return 1;
@@ -894,54 +1141,223 @@ function onPlayerFinish(){
   bannerTitle.textContent = won ? '🏆 You win!' : `Finished ${ordinal(place)}`;
   bannerText.textContent = won
     ? 'You read the terrain and drew the right wheel at the right time.'
-    : 'Try redrawing for the surface you struggled on — match the shape to the ground.';
+    : 'Adapt faster — redraw BEFORE you hit the next terrain. Watch the strip!';
 
   let pb = '';
-  if (!bestTime || raceTime < bestTime){ bestTime = raceTime;
-    localStorage.setItem('rtw_best', String(bestTime)); pb = '  ⭐ new best!'; }
+  if (!bestTime || raceTime < bestTime){
+    bestTime = raceTime;
+    localStorage.setItem('rtw_best', String(bestTime));
+    pb = '  ⭐ new best!';
+  }
+
+  // Zone split times
+  let splits = '';
+  const zoneEntries = Object.keys(player.zoneTimes).map(Number).sort((a,b)=>a-b);
+  if (zoneEntries.length > 1){
+    splits = '<br><span style="opacity:.6;font-size:11px">Splits: ';
+    for (let i=0; i<zoneEntries.length; i++){
+      const zi = zoneEntries[i];
+      if (i > 0) splits += ' · ';
+      splits += `${TERRAIN[ZONES[zi].terrain].name} ${player.zoneTimes[zi].toFixed(1)}s`;
+    }
+    splits += '</span>';
+  }
+
+  const nameOf = v => v.isPlayer ? '<b>You</b>' : (v.aiName || 'AI');
   bannerCard.innerHTML =
     `Your time: <b>${raceTime.toFixed(1)}s</b>${pb}<br>` +
     `Best: <b>${bestTime.toFixed(1)}s</b><br>` +
-    standings.map((v,i)=>`${i+1}. ${v.isPlayer?'<b>You</b>':'AI '+v.matIndex}`).join(' &nbsp;·&nbsp; ');
+    standings.map((v,i) => `${i+1}. ${nameOf(v)}`).join('  ·  ') +
+    splits;
   banner.classList.add('open');
+  redrawBtn.style.display = 'none';
+  if (won) playFanfare();
 }
+
 function ordinal(n){
   const s=['th','st','nd','rd'], v=n%100;
   return n + (s[(v-20)%10] || s[v] || s[0]);
 }
 
-function resetRace(){
-  banner.classList.remove('open');
-  raceTime = 0; raceOver = false; raceStarted = true;
-  vehicles.forEach((v,i) => {
-    v.finished = false; v.finishTime = 0; v.rubber = 1; v.materialiseT = 0;
-    v.body.setTranslation({ x:1.5 - i*0.5, y:SPAWN_Y, z:v.z }, true);
-    v.body.setRotation({ x:0, y:0, z:0, w:1 }, true);
-    v.body.setLinvel({ x:0, y:0, z:0 }, true);
-    v.body.setAngvel({ x:0, y:0, z:0 }, true);
-  });
+function cleanupRace(){
+  closeDraw();
+  for (const obj of trackObjects){
+    scene.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material && !Array.isArray(obj.material)) obj.material.dispose();
+  }
+  trackObjects.length = 0;
+  for (const v of vehicles){
+    scene.remove(v.group);
+    if (v.geom) v.geom.dispose();
+  }
+  vehicles.length = 0;
+  for (const d of carDots) d.remove();
+  carDots = [];
+  player = null;
 }
 
+function buildRace(){
+  ZONES = generateZones();
+  TRACK_LENGTH = ZONES[ZONES.length-1].end;
+  buildTrack();
+  buildFinish();
+  buildStrip();
+
+  const startPoly = presetPolygon(20, 0.05, 1.0);
+  player = makeCar({ lane:0, isPlayer:true, matIndex:0, profilePts:startPoly });
+  for (let i=0; i<AI_DRIVERS.length; i++){
+    makeCar({
+      lane:i+1, isPlayer:false, matIndex:i+1,
+      profilePts: presetPolygon(12, 0.15, 1.0),
+      ai: AI_DRIVERS[i],
+    });
+  }
+  createCarDots();
+}
+
+function resetRace(){
+  banner.classList.remove('open');
+  cleanupRace();
+  try { world.free(); } catch(e){}
+  world = new RAPIER.World({ x:0, y:GRAVITY, z:0 });
+  world.numSolverIterations = 6;
+  buildRace();
+  startCountdown();
+}
+
+// --------- Title screen ---------
+startBtn.addEventListener('click', () => {
+  titleEl.classList.add('hidden');
+  initAudio();
+  startCountdown();
+});
+
 /* =====================================================================
-   11. MAIN LOOP  — fixed-timestep physics, decoupled render.
+   11. AUDIO
+   ===================================================================== */
+let audioCtx, masterGain, engineOsc, engineFilter, engineGain, muted = false;
+
+function initAudio(){
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.25;
+    masterGain.connect(audioCtx.destination);
+    engineOsc = audioCtx.createOscillator();
+    engineFilter = audioCtx.createBiquadFilter();
+    engineGain = audioCtx.createGain();
+    engineOsc.type = 'sawtooth';
+    engineOsc.frequency.value = 55;
+    engineFilter.type = 'lowpass';
+    engineFilter.frequency.value = 180;
+    engineFilter.Q.value = 3;
+    engineGain.gain.value = 0;
+    engineOsc.connect(engineFilter);
+    engineFilter.connect(engineGain);
+    engineGain.connect(masterGain);
+    engineOsc.start();
+  } catch(e){}
+}
+
+function playTone(freq, dur, delay, vol){
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.connect(g); g.connect(masterGain);
+    osc.frequency.value = freq;
+    const t = audioCtx.currentTime + (delay||0);
+    g.gain.setValueAtTime(vol||0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.start(t);
+    osc.stop(t + dur + 0.01);
+  } catch(e){}
+}
+
+function playCountdownBeeps(){
+  playTone(440, 0.12, 0, 0.3);
+  playTone(440, 0.12, 1.0, 0.3);
+  playTone(440, 0.12, 2.0, 0.3);
+  playTone(880, 0.25, 3.0, 0.45);
+}
+
+function playMaterialise(){
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.connect(g); g.connect(masterGain);
+    osc.type = 'sine';
+    const t = audioCtx.currentTime;
+    osc.frequency.setValueAtTime(200, t);
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.2);
+    g.gain.setValueAtTime(0.25, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    osc.start(t); osc.stop(t + 0.35);
+  } catch(e){}
+}
+
+function playTerrainSwitch(){
+  playTone(330, 0.08, 0, 0.15);
+  playTone(440, 0.08, 0.06, 0.12);
+}
+
+function playPositionUp(){
+  playTone(660, 0.1, 0, 0.25);
+  playTone(880, 0.12, 0.08, 0.25);
+}
+
+function playFanfare(){
+  playTone(523.25, 0.8, 0, 0.25);
+  playTone(659.25, 0.8, 0, 0.20);
+  playTone(783.99, 0.8, 0, 0.18);
+  playTone(1046.5, 0.6, 0.15, 0.15);
+}
+
+function updateEngineSound(){
+  if (!engineOsc || !audioCtx || !player) return;
+  try {
+    const speed = Math.abs(player.body.linvel().x);
+    const norm = Math.min(speed / SPEED_CAP, 1);
+    const shouldPlay = raceStarted && !countdownActive && !raceOver;
+    engineOsc.frequency.value = 50 + norm * 70;
+    engineFilter.frequency.value = 150 + norm * 300;
+    engineGain.gain.value = shouldPlay ? 0.03 + norm * 0.07 : 0;
+  } catch(e){}
+}
+
+muteBtn.addEventListener('click', () => {
+  muted = !muted;
+  if (masterGain) masterGain.gain.value = muted ? 0 : 0.25;
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+});
+
+/* =====================================================================
+   12. MAIN LOOP
    ===================================================================== */
 let last = performance.now(), acc = 0;
 function loop(now){
   requestAnimationFrame(loop);
   let frame = (now - last)/1000; last = now;
-  if (frame > 0.1) frame = 0.1;             // tab-switch guard
-  const scale = drawOpen ? DRAW_TIMESCALE : 1; // slow-mo while drawing
-  acc += frame * scale;
+  if (frame > 0.1) frame = 0.1;
+  const scale = drawOpen ? DRAW_TIMESCALE : 1;
 
+  // Countdown runs in real time
+  if (countdownActive) updateCountdown(frame);
+
+  acc += frame * scale;
   let steps = 0;
   while (acc >= FIXED_DT && steps < MAX_SUBSTEPS){
     stepPhysics(FIXED_DT); acc -= FIXED_DT; steps++;
   }
-  if (steps === MAX_SUBSTEPS) acc = 0;      // drop the backlog
+  if (steps === MAX_SUBSTEPS) acc = 0;
 
-  syncMeshes(frame);
+  syncMeshes(frame * scale);
+  updateParticles(frame * scale);
   updateCamera(frame);
   updateHUD();
+  updateEngineSound();
   renderer.render(scene, camera);
 }
 
@@ -949,31 +1365,22 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (drawOpen) { sizeDrawCanvas(); renderStroke(strokePts.length>3); }
+  if (drawOpen){ sizeDrawCanvas(); renderStroke(strokePts.length>3); }
 });
 
 /* =====================================================================
-   12. BOOT
+   13. BOOT
    ===================================================================== */
 async function main(){
-  await RAPIER.init();                         // decode inline wasm
+  await RAPIER.init();
   world = new RAPIER.World({ x:0, y:GRAVITY, z:0 });
   world.numSolverIterations = 6;
 
-  buildStrip();
-  buildTrack();
-  buildFinish();
+  buildRace();
 
-  // Player starts on a neutral roundish wheel; redraw to adapt.
-  const startPoly = presetPolygon(20, 0.05, 1.0);
-  player = makeCar({ lane:0, isPlayer:true, matIndex:0, profilePts:startPoly });
+  // Show best time on title screen
+  if (bestTime > 0) titleBestEl.textContent = `Best: ${bestTime.toFixed(1)}s`;
 
-  // 3 AI cars: "fine everywhere, optimal nowhere" — slightly faceted/treaded.
-  makeCar({ lane:1, isPlayer:false, matIndex:1, profilePts:presetPolygon(8, 0.18, 1.0) });
-  makeCar({ lane:2, isPlayer:false, matIndex:2, profilePts:presetPolygon(11, 0.12, 0.95) });
-  makeCar({ lane:3, isPlayer:false, matIndex:3, profilePts:presetPolygon(9, 0.22, 1.05) });
-
-  raceStarted = true;
   document.getElementById('boot').remove();
   requestAnimationFrame(loop);
 }
@@ -981,9 +1388,11 @@ async function main(){
 main().catch(err => {
   console.error(err);
   const boot = document.getElementById('boot');
-  boot.classList.add('err');
-  boot.querySelector('.errmsg').textContent =
-    'Engine failed to start: ' + (err && err.message ? err.message : err);
+  if (boot){
+    boot.classList.add('err');
+    boot.querySelector('.errmsg').textContent =
+      'Engine failed: ' + (err && err.message ? err.message : err);
+  }
 });
 </script>
 </body>
