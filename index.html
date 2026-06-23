@@ -169,7 +169,7 @@
 
 <div id="drawLayer">
   <canvas id="drawCanvas"></canvas>
-  <div id="drawHint">Sketch your wheel's <b>side profile</b> &mdash; one closed loop.<br>Round = fast on tarmac &middot; Spiky = grips mud/ice &middot; Wide = floats on sand</div>
+  <div id="drawHint">Sketch your wheel's <b>side profile</b> &mdash; trace over the ghost hint or draw your own.<br>Round = tarmac &middot; Spiky = mud/ice &middot; Wide = sand</div>
   <div id="drawBtns">
     <button id="cancelBtn">Cancel</button>
     <button id="goBtn" disabled>Materialise</button>
@@ -224,20 +224,20 @@ const BASE_SPEED     = 9.5;
 const TRACTION_K     = 65;
 const TRACTION_FMAX  = 120;
 const SPEED_CAP      = 17;
-const MATERIALISE_S  = 1.0;
+const MATERIALISE_S  = 1.4;
 const DRAW_TIMESCALE = 0.12;
-const WHEEL_R        = 0.5;
-const WHEELBASE      = 0.9;
-const TRACK_W        = 0.42;
+const WHEEL_R        = 1.2;
+const WHEELBASE      = 1.6;
+const TRACK_W        = 0.7;
 const MAX_TILT       = 0.5;
-const LANES_Z        = [2.7, 0.9, -0.9, -2.7];
+const LANES_Z        = [4.5, 1.5, -1.5, -4.5];
 const COUNTDOWN_S    = 3.0;
 const PARTICLE_MAX   = 200;
 
 const AI_DRIVERS = [
-  { name:'Blaze', skill:0.82, reaction:1.0 },
-  { name:'Drift', skill:0.70, reaction:1.6 },
-  { name:'Frost', skill:0.58, reaction:2.2 },
+  { name:'Blaze', skill:0.90, reaction:0.6 },
+  { name:'Drift', skill:0.78, reaction:1.0 },
+  { name:'Frost', skill:0.65, reaction:1.5 },
 ];
 const OPTIMAL_SHAPES = {
   tarmac:{ sides:22, jitter:0.03, squash:1.0 },
@@ -293,22 +293,22 @@ function shapeTerrainMultiplier(profile, terrainKey, weatherKey){
   const { roundness, tread, width } = profile;
   let m;
   switch(terrainKey){
-    case 'tarmac': m = 0.70 + 0.65*roundness - 0.35*tread; break;
-    case 'sand':   m = 0.60 + 0.65*width + 0.30*roundness - 0.55*tread; break;
-    case 'mud':    m = 0.58 + 0.75*tread - 0.35*roundness; break;
-    case 'rocky':  m = 0.60 + 0.50*tread + 0.40*width - 0.25*roundness; break;
-    case 'ice':    m = 0.55 + 0.85*tread - 0.45*roundness; break;
-    case 'hill':   m = 0.58 + 0.70*tread + 0.20*width - 0.10*roundness; break;
+    case 'tarmac': m = 0.55 + 0.85*roundness - 0.50*tread; break;
+    case 'sand':   m = 0.40 + 0.85*width + 0.35*roundness - 0.70*tread; break;
+    case 'mud':    m = 0.38 + 0.95*tread - 0.50*roundness; break;
+    case 'rocky':  m = 0.42 + 0.65*tread + 0.55*width - 0.35*roundness; break;
+    case 'ice':    m = 0.35 + 1.05*tread - 0.55*roundness; break;
+    case 'hill':   m = 0.40 + 0.85*tread + 0.30*width - 0.20*roundness; break;
     default: m = 1.0;
   }
   switch(weatherKey){
     case 'rain':
-      if (terrainKey === 'tarmac') m -= 0.30 * roundness;
-      m -= 0.05; break;
+      if (terrainKey === 'tarmac') m -= 0.40 * roundness;
+      m -= 0.08; break;
     case 'snow':
-      m += 0.25*tread - 0.20*roundness; break;
+      m += 0.35*tread - 0.30*roundness; break;
     case 'heat':
-      if (terrainKey === 'mud') m += 0.40*roundness - 0.30*tread;
+      if (terrainKey === 'mud') m += 0.50*roundness - 0.40*tread;
       break;
   }
   return clamp(m, 0.25, 1.6);
@@ -369,7 +369,7 @@ function normaliseStroke(raw){
 
 function buildWheelGeometry(pts2d){
   const profile = geometryToProfile(pts2d);
-  const depth = 0.26 + 0.30 * profile.width;
+  const depth = 0.50 + 0.50 * profile.width;
   const shape = new THREE.Shape(pts2d.map(p => new THREE.Vector2(p.x, p.y)));
   const geom = new THREE.ExtrudeGeometry(shape, {
     depth, bevelEnabled:false, steps:1, curveSegments:2,
@@ -411,9 +411,9 @@ sun.position.set(-6, 12, 8);
 scene.add(sun);
 
 const HUB_MAT     = new THREE.MeshStandardMaterial({ color:0x202531, flatShading:true, roughness:.9 });
-const HUB_GEO     = new THREE.BoxGeometry(0.07, WHEEL_R*1.4, 0.62);
-const BODY_GEO    = new THREE.BoxGeometry(WHEELBASE*2 + 0.5, 0.26, TRACK_W*2 + 0.1);
-const CABIN_GEO   = new THREE.BoxGeometry(1.05, 0.42, TRACK_W*2 - 0.1);
+const HUB_GEO     = new THREE.BoxGeometry(0.10, WHEEL_R*1.4, 1.0);
+const BODY_GEO    = new THREE.BoxGeometry(WHEELBASE*2 + 0.8, 0.40, TRACK_W*2 + 0.15);
+const CABIN_GEO   = new THREE.BoxGeometry(1.6, 0.55, TRACK_W*2 - 0.15);
 const DRIVER_GEO  = new THREE.SphereGeometry(0.16, 8, 6);
 const WHEEL_MATS  = [
   new THREE.MeshStandardMaterial({ color:0xffce4a, flatShading:true, roughness:.6 }),
@@ -491,7 +491,7 @@ function burstParticles(x,y,z, count, color){
    ===================================================================== */
 let world;
 const trackObjects = [];
-const GROUND_Z = 9;
+const GROUND_Z = 14;
 
 function weatherForTerrain(terrain){
   const w = {
@@ -629,9 +629,9 @@ function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
       .setDensity(0.3).setFriction(0.6).setRestitution(0.0), body);
 
   const group = new THREE.Group();
-  const chassis = new THREE.Mesh(BODY_GEO, BODY_MATS[matIndex]); chassis.position.y = 0.12;
-  const cabin = new THREE.Mesh(CABIN_GEO, CABIN_MATS[matIndex]); cabin.position.set(-0.1, 0.42, 0);
-  const driver = new THREE.Mesh(DRIVER_GEO, HUB_MAT); driver.position.set(-0.1, 0.66, 0);
+  const chassis = new THREE.Mesh(BODY_GEO, BODY_MATS[matIndex]); chassis.position.y = 0.18;
+  const cabin = new THREE.Mesh(CABIN_GEO, CABIN_MATS[matIndex]); cabin.position.set(-0.15, 0.58, 0);
+  const driver = new THREE.Mesh(DRIVER_GEO, HUB_MAT); driver.position.set(-0.15, 0.90, 0);
   group.add(chassis, cabin, driver);
 
   const geom = buildWheelGeometry(profilePts);
@@ -771,7 +771,7 @@ function updateRubberBanding(){
   for (const v of vehicles){
     if (v.isPlayer){ v.rubber = 1; continue; }
     const gap = px - v.body.translation().x;
-    v.rubber = clamp(1 + gap * 0.010, 0.90, 1.12);
+    v.rubber = clamp(1 + gap * 0.008, 0.92, 1.08);
   }
 }
 
@@ -817,8 +817,8 @@ function updateCamera(dtRender){
   }
 
   const p = player.body.translation();
-  camGoal.set(p.x - 8.0, p.y + 4.6, p.z + 9.5);
-  lookGoal.set(p.x + 3.0, p.y + 0.3, p.z - 2.4);
+  camGoal.set(p.x - 10.0, p.y + 6.0, p.z + 13.0);
+  lookGoal.set(p.x + 4.0, p.y + 0.5, p.z - 3.0);
   const k = 1 - Math.pow(0.0016, dtRender);
   camera.position.lerp(camGoal, k);
   lookCurrent.lerp(lookGoal, k);
@@ -1067,10 +1067,32 @@ function sizeDrawCanvas(){
   drawCanvas.height = window.innerHeight * r;
   dctx.setTransform(r,0,0,r,0,0);
 }
+let hintShape = null;
+let hintTerrainName = '';
+
+function computeHintShape(){
+  if (!player) return;
+  const px = player.body.translation().x;
+  const zone = zoneAt(px);
+  const zIdx = ZONES.indexOf(zone);
+  const distToEnd = zone.end - px;
+  const targetZone = (distToEnd < 20 && zIdx < ZONES.length-1) ? ZONES[zIdx+1] : zone;
+  hintTerrainName = TERRAIN[targetZone.terrain].name;
+  const opt = OPTIMAL_SHAPES[targetZone.terrain];
+  const pts = [];
+  for (let i=0; i<opt.sides; i++){
+    const a = (i/opt.sides)*Math.PI*2;
+    const r = 0.5 * (1 + (opt.jitter*0.5) * Math.cos(a*3));
+    pts.push({ x:Math.cos(a)*r, y:Math.sin(a)*r*opt.squash });
+  }
+  hintShape = pts;
+}
+
 function openDraw(){
   if (redrawBtn.classList.contains('cooling')) return;
   if (!raceStarted || countdownActive || raceOver) return;
   drawOpen = true; strokePts = [];
+  computeHintShape();
   sizeDrawCanvas(); renderStroke();
   drawLayer.classList.add('open');
   goBtn.disabled = true;
@@ -1094,6 +1116,32 @@ function onDrawEnd(e){
 }
 function renderStroke(closed){
   dctx.clearRect(0,0,window.innerWidth,window.innerHeight);
+
+  // Draw ghost hint shape (ideal wheel for current/upcoming terrain)
+  if (hintShape && hintShape.length > 2){
+    const cx = window.innerWidth * 0.5;
+    const cy = window.innerHeight * 0.38;
+    const scale = Math.min(window.innerWidth, window.innerHeight) * 0.18;
+    dctx.save();
+    dctx.setLineDash([8, 6]);
+    dctx.lineWidth = 2.5;
+    dctx.strokeStyle = '#ffffff30';
+    dctx.fillStyle = '#ffffff08';
+    dctx.beginPath();
+    dctx.moveTo(cx + hintShape[0].x*scale, cy - hintShape[0].y*scale);
+    for (let i=1; i<hintShape.length; i++)
+      dctx.lineTo(cx + hintShape[i].x*scale, cy - hintShape[i].y*scale);
+    dctx.closePath();
+    dctx.fill();
+    dctx.stroke();
+    dctx.setLineDash([]);
+    dctx.font = '600 12px -apple-system,sans-serif';
+    dctx.textAlign = 'center';
+    dctx.fillStyle = '#ffffff44';
+    dctx.fillText('HINT: ' + hintTerrainName, cx, cy + scale + 22);
+    dctx.restore();
+  }
+
   if (strokePts.length < 2) return;
   dctx.lineWidth = 5; dctx.lineJoin='round'; dctx.lineCap='round';
   dctx.strokeStyle = '#ffd25e'; dctx.fillStyle = '#ffd25e22';
