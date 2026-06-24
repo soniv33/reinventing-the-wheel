@@ -224,7 +224,7 @@ const BASE_SPEED     = 9.5;
 const TRACTION_K     = 65;
 const TRACTION_FMAX  = 120;
 const SPEED_CAP      = 17;
-const MATERIALISE_S  = 1.4;
+const MATERIALISE_S  = 0.4;
 const DRAW_TIMESCALE = 0.12;
 const WHEEL_R        = 1.2;
 const WHEELBASE      = 1.6;
@@ -384,8 +384,10 @@ function buildWheelGeometry(pts2d){
 function makeWheelMesh(geom, material){
   const g = new THREE.Group();
   g.add(new THREE.Mesh(geom, material));
-  const hub = new THREE.Mesh(HUB_GEO, HUB_MAT);
-  g.add(hub);
+  const spoke1 = new THREE.Mesh(HUB_GEO, HUB_MAT);
+  const spoke2 = new THREE.Mesh(HUB_GEO, HUB_MAT);
+  spoke2.rotation.z = Math.PI / 2;
+  g.add(spoke1, spoke2);
   return g;
 }
 
@@ -411,9 +413,26 @@ sun.position.set(-6, 12, 8);
 scene.add(sun);
 
 const HUB_MAT     = new THREE.MeshStandardMaterial({ color:0x202531, flatShading:true, roughness:.9 });
-const HUB_GEO     = new THREE.BoxGeometry(0.10, WHEEL_R*1.4, 1.0);
-const BODY_GEO    = new THREE.BoxGeometry(WHEELBASE*2 + 0.8, 0.40, TRACK_W*2 + 0.15);
-const CABIN_GEO   = new THREE.BoxGeometry(1.6, 0.55, TRACK_W*2 - 0.15);
+const HUB_GEO     = new THREE.BoxGeometry(0.10, WHEEL_R*1.4, 0.55);
+const CAR_BODY_GEO = (() => {
+  const f = WHEELBASE + 0.5, r = -(WHEELBASE + 0.4), hw = TRACK_W + 0.07;
+  const s = new THREE.Shape();
+  s.moveTo(r + 0.15, 0.05); s.lineTo(f - 0.1, 0.05);
+  s.lineTo(f + 0.35, 0.18); s.lineTo(f + 0.2, 0.48);
+  s.lineTo(r - 0.08, 0.48); s.lineTo(r - 0.15, 0.18);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: hw * 2, bevelEnabled: false });
+  g.translate(0, 0, -hw); g.computeVertexNormals(); return g;
+})();
+const CAR_CABIN_GEO = (() => {
+  const f = WHEELBASE + 0.5, r = -(WHEELBASE + 0.4), hw = TRACK_W - 0.02;
+  const s = new THREE.Shape();
+  s.moveTo(f - 0.35, 0.48); s.lineTo(f - 1.05, 0.90);
+  s.lineTo(r + 1.1, 0.92); s.lineTo(r + 0.5, 0.48);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: hw * 2, bevelEnabled: false });
+  g.translate(0, 0, -hw); g.computeVertexNormals(); return g;
+})();
 const DRIVER_GEO  = new THREE.SphereGeometry(0.16, 8, 6);
 const WHEEL_MATS  = [
   new THREE.MeshStandardMaterial({ color:0xffce4a, flatShading:true, roughness:.6 }),
@@ -429,6 +448,11 @@ const WHEEL_MOUNTS = [
   { x: WHEELBASE, z: TRACK_W }, { x: WHEELBASE, z:-TRACK_W },
   { x:-WHEELBASE, z: TRACK_W }, { x:-WHEELBASE, z:-TRACK_W },
 ];
+const HEADLIGHT_MAT = new THREE.MeshStandardMaterial({ color:0xffffcc, emissive:0xffffaa, emissiveIntensity:0.3, flatShading:true });
+const TAILLIGHT_MAT = new THREE.MeshStandardMaterial({ color:0xff2222, emissive:0xff1111, emissiveIntensity:0.2, flatShading:true });
+const LIGHT_GEO = new THREE.BoxGeometry(0.06, 0.10, 0.14);
+const SPOILER_POST_GEO = new THREE.BoxGeometry(0.06, 0.20, 0.06);
+const SPOILER_WING_GEO = new THREE.BoxGeometry(0.20, 0.04, TRACK_W * 2 - 0.3);
 
 // --- Particle system ---
 const pPositions  = new Float32Array(PARTICLE_MAX * 3);
@@ -617,7 +641,7 @@ const SPAWN_Y = WHEEL_R;
 
 function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
   const z = LANES_Z[lane];
-  const spawnX = 1.5 - lane * 0.5;
+  const spawnX = 0;
 
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic().setTranslation(spawnX, SPAWN_Y, z)
@@ -629,10 +653,31 @@ function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
       .setDensity(0.3).setFriction(0.6).setRestitution(0.0), body);
 
   const group = new THREE.Group();
-  const chassis = new THREE.Mesh(BODY_GEO, BODY_MATS[matIndex]); chassis.position.y = 0.18;
-  const cabin = new THREE.Mesh(CABIN_GEO, CABIN_MATS[matIndex]); cabin.position.set(-0.15, 0.58, 0);
-  const driver = new THREE.Mesh(DRIVER_GEO, HUB_MAT); driver.position.set(-0.15, 0.90, 0);
+  const chassis = new THREE.Mesh(CAR_BODY_GEO, BODY_MATS[matIndex]);
+  const cabin = new THREE.Mesh(CAR_CABIN_GEO, CABIN_MATS[matIndex]);
+  const driver = new THREE.Mesh(DRIVER_GEO, HUB_MAT);
+  driver.position.set(-0.1, 1.05, 0);
   group.add(chassis, cabin, driver);
+
+  const cFront = WHEELBASE + 0.85, cRear = -(WHEELBASE + 0.55), cHW = TRACK_W + 0.07;
+  for (const zOff of [cHW - 0.18, -(cHW - 0.18)]) {
+    const hl = new THREE.Mesh(LIGHT_GEO, HEADLIGHT_MAT);
+    hl.position.set(cFront, 0.28, zOff);
+    group.add(hl);
+  }
+  for (const zOff of [cHW - 0.18, -(cHW - 0.18)]) {
+    const tl = new THREE.Mesh(LIGHT_GEO, TAILLIGHT_MAT);
+    tl.position.set(cRear, 0.28, zOff);
+    group.add(tl);
+  }
+  for (const zOff of [cHW - 0.22, -(cHW - 0.22)]) {
+    const post = new THREE.Mesh(SPOILER_POST_GEO, BODY_MATS[matIndex]);
+    post.position.set(cRear + 0.2, 0.58, zOff);
+    group.add(post);
+  }
+  const wing = new THREE.Mesh(SPOILER_WING_GEO, BODY_MATS[matIndex]);
+  wing.position.set(cRear + 0.2, 0.70, 0);
+  group.add(wing);
 
   const geom = buildWheelGeometry(profilePts);
   const wheels = WHEEL_MOUNTS.map(mt => {
@@ -651,7 +696,7 @@ function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
     aiName: ai ? ai.name : null,
     aiSkill: ai ? ai.skill : 0,
     aiReaction: ai ? ai.reaction : 0,
-    aiCurrentZone: null,
+    aiCurrentZone: ai ? zoneAt(spawnX) : null,
     aiSwapTimer: -1,
     lastZoneIdx: -1,
     zoneTimes: {},
@@ -740,6 +785,7 @@ function driveVehicle(v, dt){
 
   if (countdownActive){
     if (Math.abs(lv.x) > 0.1) v.body.setLinvel({ x:0, y:lv.y, z:0 }, true);
+    if (v.materialiseT > 0) v.materialiseT -= dt;
     return;
   }
 
@@ -1257,7 +1303,7 @@ function buildRace(){
   for (let i=0; i<AI_DRIVERS.length; i++){
     makeCar({
       lane:i+1, isPlayer:false, matIndex:i+1,
-      profilePts: presetPolygon(12, 0.15, 1.0),
+      profilePts: aiPresetForTerrain('tarmac', AI_DRIVERS[i].skill),
       ai: AI_DRIVERS[i],
     });
   }
