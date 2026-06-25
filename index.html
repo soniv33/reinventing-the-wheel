@@ -165,7 +165,7 @@
 </div>
 
 <button id="muteBtn" title="Toggle sound">&#x1f50a;</button>
-<button id="redrawBtn">&#x270e; REDRAW</button>
+<button id="redrawBtn">&#x270e; REDRAW (4)</button>
 
 <div id="drawLayer">
   <canvas id="drawCanvas"></canvas>
@@ -188,7 +188,7 @@
   <p class="tagline">Draw your wheel. Read the terrain. Outrun the pack.</p>
   <p id="titleBest"></p>
   <button id="startBtn">START RACE</button>
-  <p class="tip">Tap <b>REDRAW</b> mid-race to sketch a new wheel shaped for the terrain ahead</p>
+  <p class="tip">Tap <b>REDRAW</b> mid-race to sketch a new wheel (4 per race &mdash; use them wisely!)</p>
 </div>
 
 <div id="countdownEl"></div>
@@ -229,7 +229,8 @@ const DRAW_TIMESCALE = 0.12;
 const WHEEL_R        = 1.2;
 const WHEELBASE      = 1.6;
 const TRACK_W        = 0.7;
-const MAX_TILT       = 0.8;
+const MAX_TILT       = 0.35;
+const REDRAW_LIMIT   = 4;
 const LANES_Z        = [4.5, 1.5, -1.5, -4.5];
 const COUNTDOWN_S    = 3.0;
 const PARTICLE_MAX   = 200;
@@ -240,12 +241,12 @@ const AI_DRIVERS = [
   { name:'Frost', skill:0.78, reaction:0.9 },
 ];
 const OPTIMAL_SHAPES = {
-  tarmac:{ sides:22, jitter:0.03, squash:1.0 },
-  sand:  { sides:18, jitter:0.04, squash:0.55 },
-  mud:   { sides:6,  jitter:0.38, squash:1.0 },
-  rocky: { sides:7,  jitter:0.28, squash:0.78 },
-  ice:   { sides:5,  jitter:0.45, squash:1.0 },
-  hill:  { sides:7,  jitter:0.32, squash:0.88 },
+  tarmac:{ sides:24, jitter:0.03, squash:1.0 },
+  sand:  { sides:20, jitter:0.04, squash:0.55 },
+  mud:   { sides:12, jitter:0.30, squash:1.0 },
+  rocky: { sides:14, jitter:0.22, squash:0.78 },
+  ice:   { sides:10, jitter:0.35, squash:1.0 },
+  hill:  { sides:14, jitter:0.25, squash:0.88 },
 };
 
 let ZONES = [];
@@ -269,7 +270,7 @@ function geometryToProfile(pts){
   const bw = maxX-minX, bh = Math.max(1e-5, maxY-minY);
   const aspect = bw/bh;
   const roundness = clamp01(1 - cv * 2.2);
-  const tread     = clamp01(cv * 1.7 + (n/24) * 0.55);
+  const tread     = clamp01(cv * 4.0);
   const width     = clamp01((aspect - 0.7) / (1.7 - 0.7));
   return { roundness, tread, width, cv, verts:n, aspect };
 }
@@ -293,12 +294,12 @@ function shapeTerrainMultiplier(profile, terrainKey, weatherKey){
   const { roundness, tread, width } = profile;
   let m;
   switch(terrainKey){
-    case 'tarmac': m = 0.45 + 0.95*roundness - 0.65*tread; break;
-    case 'sand':   m = 0.30 + 0.95*width + 0.40*roundness - 0.80*tread; break;
-    case 'mud':    m = 0.30 + 1.10*tread - 0.60*roundness; break;
-    case 'rocky':  m = 0.35 + 0.75*tread + 0.60*width - 0.45*roundness; break;
-    case 'ice':    m = 0.28 + 1.15*tread - 0.65*roundness; break;
-    case 'hill':   m = 0.35 + 0.95*tread + 0.35*width - 0.30*roundness; break;
+    case 'tarmac': m = 0.40 + 1.10*roundness - 0.70*tread; break;
+    case 'sand':   m = 0.25 + 1.00*width + 0.45*roundness - 0.85*tread; break;
+    case 'mud':    m = 0.25 + 1.20*tread - 0.65*roundness; break;
+    case 'rocky':  m = 0.30 + 0.80*tread + 0.65*width - 0.50*roundness; break;
+    case 'ice':    m = 0.22 + 1.25*tread - 0.70*roundness; break;
+    case 'hill':   m = 0.30 + 1.00*tread + 0.40*width - 0.35*roundness; break;
     default: m = 1.0;
   }
   switch(weatherKey){
@@ -758,14 +759,10 @@ function presetPolygon(sides, jitter, squash){
   const pts=[];
   for (let i=0;i<sides;i++){
     const a = (i/sides)*Math.PI*2;
-    const r = 0.5 * (1 + (Math.random()-0.5)*jitter);
+    const r = WHEEL_R * (1 + (Math.random()-0.5)*jitter);
     pts.push({ x:Math.cos(a)*r, y:Math.sin(a)*r*squash });
   }
-  const out = normaliseStroke(pts.map(p=>({x:300+p.x*120, y:300-p.y*120})));
-  if (out) return out;
-  const circ=[]; for(let i=0;i<16;i++){ const a=(i/16)*Math.PI*2;
-    circ.push({x:300+Math.cos(a)*60, y:300-Math.sin(a)*60}); }
-  return normaliseStroke(circ);
+  return pts;
 }
 
 function aiPresetForTerrain(terrain, skill){
@@ -784,6 +781,7 @@ let player = null;
 let raceStarted = false, raceTime = 0, raceOver = false;
 let countdownActive = false, countdownTimer = 0, countdownShown = -1;
 let bestTime = parseFloat(localStorage.getItem('rtw_best') || '0') || 0;
+let redrawsLeft = REDRAW_LIMIT;
 
 function driveVehicle(v, dt){
   const tr = v.body.translation();
@@ -836,21 +834,20 @@ function driveVehicle(v, dt){
     v.body.applyImpulse({ x: -slope * 30 * dt, y: 0, z: 0 }, true);
 
     if (zone.terrain === 'rocky' && Math.abs(lv.x) > 3 && Math.random() < 0.08) {
-      v.body.applyImpulse({ x: 0, y: 1.5 + Math.random() * 2.5, z: 0 }, true);
-      v.body.applyTorqueImpulse({ x: 0, y: 0, z: (Math.random() - 0.5) * 0.5 }, true);
+      const bumpAbsorb = 1 - v.profile.tread * 0.6;
+      v.body.applyImpulse({ x: 0, y: (1.0 + Math.random() * 1.5) * bumpAbsorb, z: 0 }, true);
     }
     if (zone.terrain === 'mud')
       v.body.applyImpulse({ x: -lv.x * 1.2 * dt, y: 0, z: 0 }, true);
     if (zone.terrain === 'sand')
       v.body.applyImpulse({ x: -lv.x * 0.8 * dt, y: 0, z: 0 }, true);
-    if (zone.terrain === 'ice' && Math.abs(lv.x) > 4 && Math.random() < 0.04)
-      v.body.applyTorqueImpulse({ x: 0, y: 0, z: (Math.random() - 0.5) * 1.0 }, true);
   }
 
   if (lv.x > SPEED_CAP) v.body.setLinvel({ x:SPEED_CAP, y:lv.y, z:0 }, true);
 
   const rot = v.body.rotation();
   const ang = 2 * Math.atan2(rot.z, rot.w);
+  v.body.applyTorqueImpulse({ x:0, y:0, z: -ang * 20 * dt }, true);
   if (Math.abs(ang) > MAX_TILT){
     const c = clamp(ang, -MAX_TILT, MAX_TILT);
     v.body.setRotation({ x:0, y:0, z:Math.sin(c/2), w:Math.cos(c/2) }, true);
@@ -1130,6 +1127,8 @@ function startCountdown(){
   raceOver = false;
   lastRank = 1;
   prevPlayerZone = null;
+  redrawsLeft = REDRAW_LIMIT;
+  updateRedrawBtn();
   playCountdownBeeps();
 }
 
@@ -1188,6 +1187,7 @@ function computeHintShape(){
 
 function openDraw(){
   if (redrawBtn.classList.contains('cooling')) return;
+  if (redrawsLeft <= 0) return;
   if (!raceStarted || countdownActive || raceOver) return;
   drawOpen = true; strokePts = [];
   computeHintShape();
@@ -1264,8 +1264,21 @@ goBtn.addEventListener('click', () => {
 redrawBtn.addEventListener('click', openDraw);
 
 function startCooldown(){
-  redrawBtn.classList.add('cooling');
-  setTimeout(() => redrawBtn.classList.remove('cooling'), 1400);
+  redrawsLeft--;
+  updateRedrawBtn();
+  if (redrawsLeft > 0){
+    redrawBtn.classList.add('cooling');
+    setTimeout(() => redrawBtn.classList.remove('cooling'), 1400);
+  }
+}
+function updateRedrawBtn(){
+  if (redrawsLeft <= 0){
+    redrawBtn.textContent = '✏ NO REDRAWS';
+    redrawBtn.classList.add('cooling');
+  } else {
+    redrawBtn.textContent = '✏ REDRAW (' + redrawsLeft + ')';
+    redrawBtn.classList.remove('cooling');
+  }
 }
 
 // --------- Result banner ---------
@@ -1287,7 +1300,7 @@ function onPlayerFinish(){
   bannerTitle.textContent = won ? '🏆 You win!' : `Finished ${ordinal(place)}`;
   bannerText.textContent = won
     ? 'You read the terrain and drew the right wheel at the right time.'
-    : 'Adapt faster — redraw BEFORE you hit the next terrain. Watch the strip!';
+    : 'Plan your redraws — switch wheels BEFORE you hit the next terrain!';
 
   let pb = '';
   if (!bestTime || raceTime < bestTime){
