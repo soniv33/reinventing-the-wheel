@@ -311,7 +311,7 @@ function shapeTerrainMultiplier(profile, terrainKey, weatherKey){
       if (terrainKey === 'mud') m += 0.60*roundness - 0.50*tread;
       break;
   }
-  return clamp(m, 0.15, 1.6);
+  return clamp(m, 0.30, 1.6);
 }
 
 function clamp(v,a,b){ return v<a?a:v>b?b:v; }
@@ -577,7 +577,7 @@ function heightAt(x){
     if (x < z.start || x > z.end) continue;
     const t = (x - z.start) / (z.end - z.start);
     const env = Math.sin(Math.PI * t);
-    if (z.terrain === 'hill')  h += 3.5 * env;
+    if (z.terrain === 'hill')  h += 2.8 * env;
     if (z.terrain === 'rocky') h += env * 0.4 *
         (Math.sin(x*1.7) + 0.6*Math.sin(x*3.1 + 1) + 0.4*Math.sin(x*5.3 + 2));
     if (z.terrain === 'mud')   h += env * 0.15 * (Math.sin(x*2.1) + 0.5*Math.sin(x*4.7 + 1));
@@ -833,16 +833,16 @@ function driveVehicle(v, dt){
     v.body.applyImpulse({ x:f*dt, y:0, z:0 }, true);
 
     const slope = heightAt(tr.x + 0.5) - heightAt(tr.x - 0.5);
-    v.body.applyImpulse({ x: -slope * 45 * dt, y: 0, z: 0 }, true);
+    v.body.applyImpulse({ x: -slope * 30 * dt, y: 0, z: 0 }, true);
 
     if (zone.terrain === 'rocky' && Math.abs(lv.x) > 3 && Math.random() < 0.08) {
       v.body.applyImpulse({ x: 0, y: 1.5 + Math.random() * 2.5, z: 0 }, true);
       v.body.applyTorqueImpulse({ x: 0, y: 0, z: (Math.random() - 0.5) * 0.5 }, true);
     }
     if (zone.terrain === 'mud')
-      v.body.applyImpulse({ x: -lv.x * 2.5 * dt, y: 0, z: 0 }, true);
+      v.body.applyImpulse({ x: -lv.x * 1.2 * dt, y: 0, z: 0 }, true);
     if (zone.terrain === 'sand')
-      v.body.applyImpulse({ x: -lv.x * 1.5 * dt, y: 0, z: 0 }, true);
+      v.body.applyImpulse({ x: -lv.x * 0.8 * dt, y: 0, z: 0 }, true);
     if (zone.terrain === 'ice' && Math.abs(lv.x) > 4 && Math.random() < 0.04)
       v.body.applyTorqueImpulse({ x: 0, y: 0, z: (Math.random() - 0.5) * 1.0 }, true);
   }
