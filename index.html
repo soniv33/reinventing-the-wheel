@@ -670,10 +670,14 @@ function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
 
   const cFront = WHEELBASE + 0.80, cRear = -(WHEELBASE + 0.55), cHW = TRACK_W + 0.12;
   for (const zOff of [cHW - 0.20, -(cHW - 0.20)]) {
-    group.add(Object.assign(new THREE.Mesh(LIGHT_GEO, HEADLIGHT_MAT), {position:new THREE.Vector3(cFront, 0.55, zOff)}));
+    const hl = new THREE.Mesh(LIGHT_GEO, HEADLIGHT_MAT);
+    hl.position.set(cFront, 0.55, zOff);
+    group.add(hl);
   }
   for (const zOff of [cHW - 0.20, -(cHW - 0.20)]) {
-    group.add(Object.assign(new THREE.Mesh(LIGHT_GEO, TAILLIGHT_MAT), {position:new THREE.Vector3(cRear, 0.55, zOff)}));
+    const tl = new THREE.Mesh(LIGHT_GEO, TAILLIGHT_MAT);
+    tl.position.set(cRear, 0.55, zOff);
+    group.add(tl);
   }
   for (const mt of WHEEL_MOUNTS) {
     const strut = new THREE.Mesh(STRUT_GEO, HUB_MAT);
