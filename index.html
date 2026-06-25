@@ -219,25 +219,25 @@ import RAPIER from '@dimforge/rapier3d-compat';
    ===================================================================== */
 const FIXED_DT       = 1/60;
 const MAX_SUBSTEPS   = 5;
-const GRAVITY        = -22;
-const BASE_SPEED     = 9.5;
-const TRACTION_K     = 65;
-const TRACTION_FMAX  = 120;
-const SPEED_CAP      = 17;
+const GRAVITY        = -30;
+const BASE_SPEED     = 11;
+const TRACTION_K     = 55;
+const TRACTION_FMAX  = 150;
+const SPEED_CAP      = 20;
 const MATERIALISE_S  = 0.4;
 const DRAW_TIMESCALE = 0.12;
 const WHEEL_R        = 1.2;
 const WHEELBASE      = 1.6;
 const TRACK_W        = 0.7;
-const MAX_TILT       = 0.5;
+const MAX_TILT       = 0.8;
 const LANES_Z        = [4.5, 1.5, -1.5, -4.5];
 const COUNTDOWN_S    = 3.0;
 const PARTICLE_MAX   = 200;
 
 const AI_DRIVERS = [
-  { name:'Blaze', skill:0.90, reaction:0.6 },
-  { name:'Drift', skill:0.78, reaction:1.0 },
-  { name:'Frost', skill:0.65, reaction:1.5 },
+  { name:'Blaze', skill:0.96, reaction:0.35 },
+  { name:'Drift', skill:0.88, reaction:0.6 },
+  { name:'Frost', skill:0.78, reaction:0.9 },
 ];
 const OPTIMAL_SHAPES = {
   tarmac:{ sides:22, jitter:0.03, squash:1.0 },
@@ -293,25 +293,25 @@ function shapeTerrainMultiplier(profile, terrainKey, weatherKey){
   const { roundness, tread, width } = profile;
   let m;
   switch(terrainKey){
-    case 'tarmac': m = 0.55 + 0.85*roundness - 0.50*tread; break;
-    case 'sand':   m = 0.40 + 0.85*width + 0.35*roundness - 0.70*tread; break;
-    case 'mud':    m = 0.38 + 0.95*tread - 0.50*roundness; break;
-    case 'rocky':  m = 0.42 + 0.65*tread + 0.55*width - 0.35*roundness; break;
-    case 'ice':    m = 0.35 + 1.05*tread - 0.55*roundness; break;
-    case 'hill':   m = 0.40 + 0.85*tread + 0.30*width - 0.20*roundness; break;
+    case 'tarmac': m = 0.45 + 0.95*roundness - 0.65*tread; break;
+    case 'sand':   m = 0.30 + 0.95*width + 0.40*roundness - 0.80*tread; break;
+    case 'mud':    m = 0.30 + 1.10*tread - 0.60*roundness; break;
+    case 'rocky':  m = 0.35 + 0.75*tread + 0.60*width - 0.45*roundness; break;
+    case 'ice':    m = 0.28 + 1.15*tread - 0.65*roundness; break;
+    case 'hill':   m = 0.35 + 0.95*tread + 0.35*width - 0.30*roundness; break;
     default: m = 1.0;
   }
   switch(weatherKey){
     case 'rain':
-      if (terrainKey === 'tarmac') m -= 0.40 * roundness;
-      m -= 0.08; break;
+      if (terrainKey === 'tarmac') m -= 0.50 * roundness;
+      m -= 0.12; break;
     case 'snow':
-      m += 0.35*tread - 0.30*roundness; break;
+      m += 0.45*tread - 0.40*roundness; break;
     case 'heat':
-      if (terrainKey === 'mud') m += 0.50*roundness - 0.40*tread;
+      if (terrainKey === 'mud') m += 0.60*roundness - 0.50*tread;
       break;
   }
-  return clamp(m, 0.25, 1.6);
+  return clamp(m, 0.15, 1.6);
 }
 
 function clamp(v,a,b){ return v<a?a:v>b?b:v; }
@@ -415,20 +415,20 @@ scene.add(sun);
 const HUB_MAT     = new THREE.MeshStandardMaterial({ color:0x202531, flatShading:true, roughness:.9 });
 const HUB_GEO     = new THREE.BoxGeometry(0.10, WHEEL_R*1.4, 0.55);
 const CAR_BODY_GEO = (() => {
-  const f = WHEELBASE + 0.5, r = -(WHEELBASE + 0.4), hw = TRACK_W + 0.07;
+  const f = WHEELBASE + 0.5, r = -(WHEELBASE + 0.4), hw = TRACK_W + 0.12;
   const s = new THREE.Shape();
-  s.moveTo(r + 0.15, 0.05); s.lineTo(f - 0.1, 0.05);
-  s.lineTo(f + 0.35, 0.18); s.lineTo(f + 0.2, 0.48);
-  s.lineTo(r - 0.08, 0.48); s.lineTo(r - 0.15, 0.18);
+  s.moveTo(r + 0.1, 0.30); s.lineTo(f - 0.1, 0.30);
+  s.lineTo(f + 0.3, 0.42); s.lineTo(f + 0.2, 0.70);
+  s.lineTo(r - 0.1, 0.70); s.lineTo(r - 0.15, 0.42);
   s.closePath();
   const g = new THREE.ExtrudeGeometry(s, { depth: hw * 2, bevelEnabled: false });
   g.translate(0, 0, -hw); g.computeVertexNormals(); return g;
 })();
 const CAR_CABIN_GEO = (() => {
-  const f = WHEELBASE + 0.5, r = -(WHEELBASE + 0.4), hw = TRACK_W - 0.02;
+  const f = WHEELBASE + 0.5, hw = TRACK_W;
   const s = new THREE.Shape();
-  s.moveTo(f - 0.35, 0.48); s.lineTo(f - 1.05, 0.90);
-  s.lineTo(r + 1.1, 0.92); s.lineTo(r + 0.5, 0.48);
+  s.moveTo(f - 0.3, 0.70); s.lineTo(f - 0.85, 1.22);
+  s.lineTo(-0.1, 1.24); s.lineTo(0.25, 0.70);
   s.closePath();
   const g = new THREE.ExtrudeGeometry(s, { depth: hw * 2, bevelEnabled: false });
   g.translate(0, 0, -hw); g.computeVertexNormals(); return g;
@@ -450,9 +450,15 @@ const WHEEL_MOUNTS = [
 ];
 const HEADLIGHT_MAT = new THREE.MeshStandardMaterial({ color:0xffffcc, emissive:0xffffaa, emissiveIntensity:0.3, flatShading:true });
 const TAILLIGHT_MAT = new THREE.MeshStandardMaterial({ color:0xff2222, emissive:0xff1111, emissiveIntensity:0.2, flatShading:true });
+const ROOF_LIGHT_MAT = new THREE.MeshStandardMaterial({ color:0xffee66, emissive:0xffdd33, emissiveIntensity:0.5, flatShading:true });
 const LIGHT_GEO = new THREE.BoxGeometry(0.06, 0.10, 0.14);
-const SPOILER_POST_GEO = new THREE.BoxGeometry(0.06, 0.20, 0.06);
-const SPOILER_WING_GEO = new THREE.BoxGeometry(0.20, 0.04, TRACK_W * 2 - 0.3);
+const ROOF_LIGHT_GEO = new THREE.BoxGeometry(0.10, 0.08, 0.10);
+const ROLLBAR_POST_GEO = new THREE.BoxGeometry(0.07, 0.30, 0.07);
+const ROLLBAR_TOP_GEO = new THREE.BoxGeometry(0.07, 0.07, TRACK_W * 2 - 0.1);
+const STRUT_GEO = new THREE.BoxGeometry(0.08, 0.32, 0.08);
+const BED_WALL_GEO = new THREE.BoxGeometry(WHEELBASE + 0.1, 0.22, 0.06);
+const BULLBAR_GEO = new THREE.BoxGeometry(0.10, 0.18, TRACK_W * 2 + 0.1);
+const EXHAUST_GEO = (() => { const g = new THREE.CylinderGeometry(0.05, 0.06, 0.50, 6); return g; })();
 
 // --- Particle system ---
 const pPositions  = new Float32Array(PARTICLE_MAX * 3);
@@ -570,9 +576,12 @@ function heightAt(x){
   for (const z of ZONES){
     if (x < z.start || x > z.end) continue;
     const t = (x - z.start) / (z.end - z.start);
-    if (z.terrain === 'hill')  h += 1.7 * Math.sin(Math.PI * t);
-    if (z.terrain === 'rocky') h += Math.sin(Math.PI*t) * 0.16 *
-        (Math.sin(x*1.7) + 0.6*Math.sin(x*3.1 + 1));
+    const env = Math.sin(Math.PI * t);
+    if (z.terrain === 'hill')  h += 3.5 * env;
+    if (z.terrain === 'rocky') h += env * 0.4 *
+        (Math.sin(x*1.7) + 0.6*Math.sin(x*3.1 + 1) + 0.4*Math.sin(x*5.3 + 2));
+    if (z.terrain === 'mud')   h += env * 0.15 * (Math.sin(x*2.1) + 0.5*Math.sin(x*4.7 + 1));
+    if (z.terrain === 'sand')  h += env * 0.25 * Math.sin(x*0.8 + 0.5);
   }
   return h;
 }
@@ -656,28 +665,47 @@ function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
   const chassis = new THREE.Mesh(CAR_BODY_GEO, BODY_MATS[matIndex]);
   const cabin = new THREE.Mesh(CAR_CABIN_GEO, CABIN_MATS[matIndex]);
   const driver = new THREE.Mesh(DRIVER_GEO, HUB_MAT);
-  driver.position.set(-0.1, 1.05, 0);
+  driver.position.set(0.4, 1.35, 0);
   group.add(chassis, cabin, driver);
 
-  const cFront = WHEELBASE + 0.85, cRear = -(WHEELBASE + 0.55), cHW = TRACK_W + 0.07;
-  for (const zOff of [cHW - 0.18, -(cHW - 0.18)]) {
-    const hl = new THREE.Mesh(LIGHT_GEO, HEADLIGHT_MAT);
-    hl.position.set(cFront, 0.28, zOff);
-    group.add(hl);
+  const cFront = WHEELBASE + 0.80, cRear = -(WHEELBASE + 0.55), cHW = TRACK_W + 0.12;
+  for (const zOff of [cHW - 0.20, -(cHW - 0.20)]) {
+    group.add(Object.assign(new THREE.Mesh(LIGHT_GEO, HEADLIGHT_MAT), {position:new THREE.Vector3(cFront, 0.55, zOff)}));
   }
-  for (const zOff of [cHW - 0.18, -(cHW - 0.18)]) {
-    const tl = new THREE.Mesh(LIGHT_GEO, TAILLIGHT_MAT);
-    tl.position.set(cRear, 0.28, zOff);
-    group.add(tl);
+  for (const zOff of [cHW - 0.20, -(cHW - 0.20)]) {
+    group.add(Object.assign(new THREE.Mesh(LIGHT_GEO, TAILLIGHT_MAT), {position:new THREE.Vector3(cRear, 0.55, zOff)}));
   }
-  for (const zOff of [cHW - 0.22, -(cHW - 0.22)]) {
-    const post = new THREE.Mesh(SPOILER_POST_GEO, BODY_MATS[matIndex]);
-    post.position.set(cRear + 0.2, 0.58, zOff);
-    group.add(post);
+  for (const mt of WHEEL_MOUNTS) {
+    const strut = new THREE.Mesh(STRUT_GEO, HUB_MAT);
+    strut.position.set(mt.x, 0.14, mt.z);
+    group.add(strut);
   }
-  const wing = new THREE.Mesh(SPOILER_WING_GEO, BODY_MATS[matIndex]);
-  wing.position.set(cRear + 0.2, 0.70, 0);
-  group.add(wing);
+  const bar = new THREE.Mesh(BULLBAR_GEO, HUB_MAT);
+  bar.position.set(cFront + 0.05, 0.45, 0);
+  group.add(bar);
+  for (const zOff of [TRACK_W - 0.03, -(TRACK_W - 0.03)]) {
+    const bw = new THREE.Mesh(BED_WALL_GEO, BODY_MATS[matIndex]);
+    bw.position.set(-(WHEELBASE * 0.5 + 0.15), 0.81, zOff);
+    group.add(bw);
+  }
+  for (const zOff of [cHW - 0.25, -(cHW - 0.25)]) {
+    const rp = new THREE.Mesh(ROLLBAR_POST_GEO, HUB_MAT);
+    rp.position.set(-0.1, 1.39, zOff);
+    group.add(rp);
+  }
+  const rt = new THREE.Mesh(ROLLBAR_TOP_GEO, HUB_MAT);
+  rt.position.set(-0.1, 1.55, 0);
+  group.add(rt);
+  for (let li = -1; li <= 1; li++) {
+    const rl = new THREE.Mesh(ROOF_LIGHT_GEO, ROOF_LIGHT_MAT);
+    rl.position.set(-0.1, 1.60, li * 0.35);
+    group.add(rl);
+  }
+  for (const zOff of [TRACK_W - 0.15, -(TRACK_W - 0.15)]) {
+    const ex = new THREE.Mesh(EXHAUST_GEO, HUB_MAT);
+    ex.position.set(0.2, 0.95, zOff);
+    group.add(ex);
+  }
 
   const geom = buildWheelGeometry(profilePts);
   const wheels = WHEEL_MOUNTS.map(mt => {
@@ -764,16 +792,18 @@ function driveVehicle(v, dt){
     if (!(zIdx in v.zoneTimes)) v.zoneTimes[zIdx] = raceTime;
   }
 
-  // AI wheel swapping
+  // AI wheel swapping with lookahead
   if (!v.isPlayer && v.aiSkill > 0){
-    if (zone !== v.aiCurrentZone){
-      v.aiCurrentZone = zone;
+    const lookDist = 6 + v.aiSkill * 14;
+    const targetZone = zoneAt(tr.x + lookDist);
+    if (targetZone !== v.aiCurrentZone){
+      v.aiCurrentZone = targetZone;
       v.aiSwapTimer = v.aiReaction * (0.8 + Math.random()*0.4);
     }
     if (v.aiSwapTimer > 0){
       v.aiSwapTimer -= dt;
       if (v.aiSwapTimer <= 0){
-        const pts = aiPresetForTerrain(zone.terrain, v.aiSkill);
+        const pts = aiPresetForTerrain(v.aiCurrentZone.terrain, v.aiSkill);
         replaceWheel(v, pts);
       }
     }
@@ -797,6 +827,20 @@ function driveVehicle(v, dt){
     let f = TRACTION_K * (targetSpeed - lv.x);
     f = clamp(f, -TRACTION_FMAX, TRACTION_FMAX);
     v.body.applyImpulse({ x:f*dt, y:0, z:0 }, true);
+
+    const slope = heightAt(tr.x + 0.5) - heightAt(tr.x - 0.5);
+    v.body.applyImpulse({ x: -slope * 45 * dt, y: 0, z: 0 }, true);
+
+    if (zone.terrain === 'rocky' && Math.abs(lv.x) > 3 && Math.random() < 0.08) {
+      v.body.applyImpulse({ x: 0, y: 1.5 + Math.random() * 2.5, z: 0 }, true);
+      v.body.applyTorqueImpulse({ x: 0, y: 0, z: (Math.random() - 0.5) * 0.5 }, true);
+    }
+    if (zone.terrain === 'mud')
+      v.body.applyImpulse({ x: -lv.x * 2.5 * dt, y: 0, z: 0 }, true);
+    if (zone.terrain === 'sand')
+      v.body.applyImpulse({ x: -lv.x * 1.5 * dt, y: 0, z: 0 }, true);
+    if (zone.terrain === 'ice' && Math.abs(lv.x) > 4 && Math.random() < 0.04)
+      v.body.applyTorqueImpulse({ x: 0, y: 0, z: (Math.random() - 0.5) * 1.0 }, true);
   }
 
   if (lv.x > SPEED_CAP) v.body.setLinvel({ x:SPEED_CAP, y:lv.y, z:0 }, true);
@@ -817,7 +861,11 @@ function updateRubberBanding(){
   for (const v of vehicles){
     if (v.isPlayer){ v.rubber = 1; continue; }
     const gap = px - v.body.translation().x;
-    v.rubber = clamp(1 + gap * 0.008, 0.92, 1.08);
+    if (gap > 0) {
+      v.rubber = clamp(1 + gap * 0.014, 0.90, 1.18);
+    } else {
+      v.rubber = clamp(1 + gap * 0.005, 0.93, 1.05);
+    }
   }
 }
 
