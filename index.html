@@ -9,9 +9,8 @@
   :root { --good:#46d36a; --bad:#e0533d; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { margin:0; height:100%; overflow:hidden; background:#e8f4f8;
-    font-family:'Bangers','Comic Sans MS',cursive,sans-serif;
+    font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
     color:#222; user-select:none; -webkit-user-select:none; touch-action:none; }
-  @import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');
   #app { position:fixed; inset:0; }
   canvas { display:block; width:100%; height:100%; }
 
@@ -210,7 +209,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 const FIXED_DT       = 1/60;
 const MAX_SUBSTEPS   = 5;
-const GRAVITY        = -25;
+const GRAVITY        = -12;
 const MOTOR_TORQUE   = 80;
 const MOTOR_DAMPING  = 5;
 const SPEED_CAP      = 18;
@@ -388,7 +387,7 @@ function buildTrack(){
 
   const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
   const tri = RAPIER.ColliderDesc.trimesh(new Float32Array(verts), new Uint32Array(idx));
-  if (tri) world.createCollider(tri.setFriction(0.8).setRestitution(0.1), body);
+  if (tri) world.createCollider(tri.setFriction(0.8).setRestitution(0.0), body);
   groundBodies.push(body);
 
   addTrees(x0, x1);
@@ -487,7 +486,7 @@ function makeCar({ lane, isPlayer, matIndex, profilePts, ai }){
   const z = LANES_Z[lane];
   const startX = 0;
   const groundY = heightAt(startX);
-  const spawnY = groundY + WHEEL_R + CHASSIS_H + 0.3;
+  const spawnY = groundY + WHEEL_R + CHASSIS_H + 0.02;
 
   const chassisDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(startX, spawnY, z)
@@ -1129,6 +1128,19 @@ function buildRace(){
       profilePts:aiPresetForTerrain('tarmac', AI_DRIVERS[i].skill), ai:AI_DRIVERS[i] });
   }
   createCarDots();
+
+  for(let i=0; i<60; i++){
+    world.timestep = FIXED_DT;
+    world.step();
+  }
+  for(const v of vehicles){
+    v.chassisBody.setLinvel({x:0,y:0,z:0}, true);
+    v.chassisBody.setAngvel({x:0,y:0,z:0}, true);
+    for(const wb of v.wheelBodies){
+      wb.setLinvel({x:0,y:0,z:0}, true);
+      wb.setAngvel({x:0,y:0,z:0}, true);
+    }
+  }
 }
 
 function resetRace(){
@@ -1136,7 +1148,7 @@ function resetRace(){
   cleanupRace();
   try{world.free();}catch(e){}
   world = new RAPIER.World({x:0, y:GRAVITY, z:0});
-  world.numSolverIterations = 8;
+  world.numSolverIterations = 12;
   buildRace();
   startCountdown();
 }
@@ -1237,7 +1249,7 @@ window.addEventListener('resize', ()=>{
 async function main(){
   await RAPIER.init();
   world = new RAPIER.World({x:0, y:GRAVITY, z:0});
-  world.numSolverIterations = 8;
+  world.numSolverIterations = 12;
   buildRace();
   if(bestTime>0) titleBestEl.textContent = 'Best: '+bestTime.toFixed(1)+'s';
   document.getElementById('boot').remove();
