@@ -878,14 +878,24 @@ function driveVehicle(v, dt){
     f = clamp(f, -TRACTION_FMAX, TRACTION_FMAX);
     v.body.applyImpulse({ x:f*dt, y:0, z:0 }, true);
 
-    v.body.applyImpulse({ x:0, y: -8 * dt, z:0 }, true);
+    v.body.applyImpulse({ x:0, y: -12 * dt, z:0 }, true);
 
     const slope = heightAt(tr.x + 0.5) - heightAt(tr.x - 0.5);
     v.body.applyImpulse({ x: -slope * 35 * dt, y: 0, z: 0 }, true);
 
-    if (zone.terrain === 'rocky' && Math.abs(lv.x) > 3 && Math.random() < 0.06) {
+    const cv = v.profile.cv;
+    if (cv > 0.03) {
+      const rollFreq = Math.max(4, v.profile.verts || 8);
+      const rollPhase = (v.spinAngle * rollFreq) % (Math.PI * 2);
+      const bounce = Math.sin(rollPhase) * cv * 3.5;
+      v.body.applyImpulse({ x: 0, y: bounce * dt * Math.abs(lv.x) * 0.8, z: 0 }, true);
+      const speedPenalty = cv * 0.4 * Math.abs(lv.x);
+      v.body.applyImpulse({ x: -speedPenalty * dt, y: 0, z: 0 }, true);
+    }
+
+    if (zone.terrain === 'rocky' && Math.abs(lv.x) > 4 && Math.random() < 0.04) {
       const bumpAbsorb = 1 - v.profile.tread * 0.7;
-      v.body.applyImpulse({ x: 0, y: (0.6 + Math.random() * 1.0) * bumpAbsorb, z: 0 }, true);
+      v.body.applyImpulse({ x: 0, y: (0.4 + Math.random() * 0.6) * bumpAbsorb, z: 0 }, true);
     }
     if (zone.terrain === 'mud')
       v.body.applyImpulse({ x: -lv.x * 1.4 * dt, y: 0, z: 0 }, true);
@@ -899,12 +909,10 @@ function driveVehicle(v, dt){
 
   const rot = v.body.rotation();
   const ang = 2 * Math.atan2(rot.z, rot.w);
-  v.body.applyTorqueImpulse({ x:0, y:0, z: -ang * 30 * dt }, true);
+  v.body.applyTorqueImpulse({ x:0, y:0, z: -ang * 40 * dt }, true);
   if (Math.abs(ang) > MAX_TILT){
-    const c = clamp(ang, -MAX_TILT, MAX_TILT);
-    v.body.setRotation({ x:0, y:0, z:Math.sin(c/2), w:Math.cos(c/2) }, true);
-    const av = v.body.angvel();
-    v.body.setAngvel({ x:0, y:0, z:av.z*0.1 }, true);
+    v.body.setRotation({ x:0, y:0, z:Math.sin(clamp(ang,-MAX_TILT,MAX_TILT)/2), w:Math.cos(clamp(ang,-MAX_TILT,MAX_TILT)/2) }, true);
+    v.body.setAngvel({ x:0, y:0, z:0 }, true);
   }
 }
 
@@ -1451,7 +1459,7 @@ function resetRace(){
   cleanupRace();
   try { world.free(); } catch(e){}
   world = new RAPIER.World({ x:0, y:GRAVITY, z:0 });
-  world.numSolverIterations = 6;
+  world.numSolverIterations = 8;
   buildRace();
   startCountdown();
 }
@@ -1604,7 +1612,7 @@ window.addEventListener('resize', () => {
 async function main(){
   await RAPIER.init();
   world = new RAPIER.World({ x:0, y:GRAVITY, z:0 });
-  world.numSolverIterations = 6;
+  world.numSolverIterations = 8;
 
   buildRace();
 
