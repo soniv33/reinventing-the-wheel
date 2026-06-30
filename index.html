@@ -777,6 +777,9 @@ function driveVehicle(v, dt){
 
   if(countdownActive){
     if(Math.abs(lv.x)>0.1) v.chassisBody.setLinvel({x:0,y:lv.y},true);
+    v.chassisBody.setAngvel(0,true);
+    const ang=v.chassisBody.rotation();
+    if(Math.abs(ang)>0.15) v.chassisBody.setRotation(clamp(ang,-0.15,0.15),true);
     for(const wb of v.wheelBodies){
       const wv=wb.linvel();
       if(Math.abs(wv.x)>0.1) wb.setLinvel({x:0,y:wv.y},true);
