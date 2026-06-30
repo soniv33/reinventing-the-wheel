@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#4EC0CA" />
 <title>Reinventing the Wheel</title>
 <style>
-  :root { --good:#46d36a; --bad:#e0533d; }
+  :root { --good:#46d36a; --bad:#e0533d; --vh-offset:0px; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { margin:0; height:100%; overflow:hidden; background:#222;
     font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
@@ -39,7 +39,7 @@
   #muteBtn { position:fixed; top:2px; right:6px; z-index:10; background:none; border:none;
     color:#fff; font-size:16px; cursor:pointer; padding:6px; text-shadow:1px 1px 0 #000; }
 
-  #redrawBtn { position:fixed; bottom:max(16px,env(safe-area-inset-bottom));
+  #redrawBtn { position:fixed; bottom:calc(max(16px,env(safe-area-inset-bottom)) + var(--vh-offset));
     left:50%; transform:translateX(-50%); padding:12px 24px; border:3px solid #000;
     border-radius:26px; font-size:16px; font-weight:800; letter-spacing:1px;
     color:#000; background:#ffd25e;
@@ -57,7 +57,7 @@
     text-align:center; font-size:15px; font-weight:700; color:#fff;
     text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 20px; z-index:21; }
   #drawHint b { color:#ffd25e; }
-  #drawBtns { position:fixed; bottom:max(18px,env(safe-area-inset-bottom));
+  #drawBtns { position:fixed; bottom:calc(max(18px,env(safe-area-inset-bottom)) + var(--vh-offset));
     left:0; right:0; display:flex; gap:12px; justify-content:center; padding:0 16px; z-index:21; }
   #drawBtns button { flex:1; max-width:180px; padding:12px; border:3px solid #000;
     border-radius:20px; font-size:15px; font-weight:800; cursor:pointer;
@@ -214,12 +214,31 @@ const ctx = canvas.getContext('2d');
 let W, H;
 function resize(){
   const dpr = Math.min(window.devicePixelRatio||1, 2);
-  W = window.innerWidth; H = window.innerHeight;
+  const vv = window.visualViewport;
+  W = vv ? vv.width : window.innerWidth;
+  H = vv ? vv.height : window.innerHeight;
   canvas.width = W*dpr; canvas.height = H*dpr;
   canvas.style.width = W+'px'; canvas.style.height = H+'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
 }
 resize();
+
+// Mobile browsers can report a layout viewport (window.innerHeight) taller
+// than the actually-visible area when the address bar/toolbar overlaps the
+// bottom of the screen. Fixed-bottom UI anchored to innerHeight then renders
+// underneath that chrome. Track the gap via visualViewport and push fixed
+// bottom elements up by it.
+function updateViewportOffset(){
+  const vv = window.visualViewport;
+  if(!vv) return;
+  const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  document.documentElement.style.setProperty('--vh-offset', offset+'px');
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', updateViewportOffset);
+  window.visualViewport.addEventListener('scroll', updateViewportOffset);
+  updateViewportOffset();
+}
 
 /* ===== ZONES / HEIGHT ===== */
 let ZONES = [], TRACK_LENGTH = 280;
@@ -821,7 +840,9 @@ function updateCamera(dt){
     camY=heightAt(camX);
     return;
   }
-  const tgtX=p.x-5, tgtY=p.y;
+  // Lead distance must scale with viewport width — a fixed meter offset
+  // pins the car against the screen edge on narrow phone viewports.
+  const tgtX=p.x-(W*0.30)/PPM, tgtY=p.y;
   const k=1-Math.pow(0.004,dt);
   camX+=(tgtX-camX)*k;
   camY+=(tgtY-camY)*k;
@@ -1175,6 +1196,7 @@ function loop(now){
 
 window.addEventListener('resize',()=>{
   resize();
+  updateViewportOffset();
   if(drawOpen){sizeDrawCanvas();renderStroke(strokePts.length>3);}
 });
 
