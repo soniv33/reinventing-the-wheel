@@ -344,7 +344,7 @@ function roundRect(cx,x,y,w,h,r){
 
 let camX=0, camY=0;
 function worldToScreen(wx,wy){
-  return { x:(wx-camX)*PPM+W*0.28, y:H*0.68-(wy-camY)*PPM };
+  return { x:(wx-camX)*PPM+W*0.5, y:H*0.68-(wy-camY)*PPM };
 }
 
 /* ===== RENDERING ===== */
@@ -840,9 +840,7 @@ function updateCamera(dt){
     camY=heightAt(camX);
     return;
   }
-  // Lead distance must scale with viewport width — a fixed meter offset
-  // pins the car against the screen edge on narrow phone viewports.
-  const tgtX=p.x-(W*0.30)/PPM, tgtY=p.y;
+  const tgtX=p.x, tgtY=p.y;
   const k=1-Math.pow(0.004,dt);
   camX+=(tgtX-camX)*k;
   camY+=(tgtY-camY)*k;
